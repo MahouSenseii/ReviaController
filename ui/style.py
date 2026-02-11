@@ -1,4 +1,4 @@
-﻿# ui/style.py
+# ui/style.py
 
 DARK_STYLE = """
 QWidget {
@@ -28,7 +28,6 @@ QLabel#SectionLabel {
     margin-bottom: 2px;
 }
 
-
 /* Define accent style once */
 QLabel[class="AccentTitle"] {
     background: #151c27;
@@ -39,38 +38,35 @@ QLabel[class="AccentTitle"] {
 }
 
 QLabel#ActivityPanelTitle {
-
     background: #151c27;
     font-size: 25px;
     font-weight: 800;
-    color: #8fc9ff;  
+    color: #8fc9ff;
     border-radius: 9px;
     padding: 6px 16px;
 }
 
 QLabel#StatusPanelTitle {
-
     background: #151c27;
     font-size: 25px;
     font-weight: 800;
-    color: #8fc9ff;  
+    color: #8fc9ff;
     border-radius: 9px;
     padding: 6px 16px;
 }
 
-
 QLabel#TopBarText {
     color: #c7d3e6;
     font-size: 18px;
-    border: 1px solid rgba(70, 110, 170, 90); 
-    border-radius: 9px;   
+    border: 1px solid rgba(70, 110, 170, 90);
+    border-radius: 9px;
     padding: 6px 16px;
 }
 
 QLabel#MonoInfo {
     color: #c7d3e6;
     line-height: 1.4;
-     font-size: 18px;
+    font-size: 18px;
 }
 
 /* Sidebar title */
@@ -120,10 +116,9 @@ QTabBar::tab:selected {
     border-bottom-color: #151c27;
 }
 
-
 /* Status dot base */
 QWidget#StatusDot {
-    border-radius: 5px; 
+    border-radius: 5px;
 }
 
 /* Green (on) */
@@ -165,5 +160,105 @@ QCheckBox#ToggleSwitch::indicator:checked {
     border-radius: 10px;
 }
 
+/* ── Mode / Profile buttons ─────────────────────────── */
+QPushButton#ModeButton {
+    background: #0f1621;
+    border: 1px solid #2b3b53;
+    border-radius: 8px;
+    color: #8fa6c3;
+    padding: 6px 12px;
+    text-align: center;
+    font-size: 12px;
+}
+QPushButton#ModeButton:hover {
+    background: #182232;
+    border-color: #3a5070;
+    color: #c7d3e6;
+}
+QPushButton#ModeButton:checked {
+    background: #1a2e44;
+    border-color: #4a8cd8;
+    color: #d8e1ee;
+}
 
+/* ── Settings tab input widgets ─────────────────────── */
+QComboBox#SettingsCombo {
+    background: #101824;
+    border: 1px solid #2a3b55;
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: #d8e1ee;
+    min-height: 24px;
+}
+QComboBox#SettingsCombo::drop-down {
+    border: none;
+    width: 20px;
+}
+QComboBox#SettingsCombo QAbstractItemView {
+    background: #101824;
+    border: 1px solid #2a3b55;
+    color: #d8e1ee;
+    selection-background-color: #1a2e44;
+}
+
+QLineEdit#SettingsLineEdit {
+    background: #101824;
+    border: 1px solid #2a3b55;
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: #d8e1ee;
+    min-height: 24px;
+}
+QLineEdit#SettingsLineEdit:focus {
+    border-color: #4a8cd8;
+}
+
+QSpinBox#SettingsSpin, QDoubleSpinBox#SettingsDoubleSpin {
+    background: #101824;
+    border: 1px solid #2a3b55;
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: #d8e1ee;
+    min-height: 24px;
+}
+
+QSlider#SettingsSlider::groove:horizontal {
+    background: #0a0f18;
+    border: 1px solid #2a3b55;
+    border-radius: 4px;
+    height: 8px;
+}
+QSlider#SettingsSlider::handle:horizontal {
+    background: #33d17a;
+    border-radius: 6px;
+    width: 12px;
+    margin: -3px 0;
+}
+QSlider#SettingsSlider::sub-page:horizontal {
+    background: #1a4a3a;
+    border-radius: 4px;
+}
+
+/* Radio buttons (Filters tab) */
+QRadioButton#FilterRadio {
+    spacing: 6px;
+    color: #d8e1ee;
+}
+QRadioButton#FilterRadio::indicator {
+    width: 14px;
+    height: 14px;
+    border: 2px solid #2a3b55;
+    border-radius: 8px;
+    background: #0a0f18;
+}
+QRadioButton#FilterRadio::indicator:checked {
+    background: #33d17a;
+    border-color: #2bd46f;
+}
+
+/* Tab heading labels */
+QLabel#TabHeading {
+    background: transparent;
+    border: none;
+}
 """
