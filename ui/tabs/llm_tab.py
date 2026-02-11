@@ -278,6 +278,10 @@ class LLMTab(BaseTab):
         idx = self._local_combo.currentIndex()
         models = self._get_local_models()
         if not models or idx < 0 or idx >= len(models):
+            QMessageBox.warning(
+                self, "No Model Selected",
+                "Please select a model from the dropdown before removing.",
+            )
             return
 
         name = models[idx]["name"]
@@ -561,6 +565,10 @@ class LLMTab(BaseTab):
         idx = self._online_combo.currentIndex()
         models = self._get_online_models()
         if not models or idx < 0 or idx >= len(models):
+            QMessageBox.warning(
+                self, "No LLM Selected",
+                "Please select an LLM config from the dropdown before removing.",
+            )
             return
 
         name = models[idx]["name"]
