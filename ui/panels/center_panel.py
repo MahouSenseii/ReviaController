@@ -50,6 +50,7 @@ class CenterPanel(BasePanel):
         self.bus.subscribe("assistant_status", self._on_assistant_status)
         self.bus.subscribe("activity_log", self._on_activity_log)
         self.bus.subscribe("inference_metrics", self._on_inference_metrics)
+        self.bus.subscribe("model_changed", self._on_model_changed)
 
     # ── Section builders ──────────────────────────────────────
 
@@ -127,12 +128,32 @@ class CenterPanel(BasePanel):
         il.setContentsMargins(12, 12, 12, 12)
         il.setSpacing(12)
 
+        # Left column — model identity + live metrics
+        left = QVBoxLayout()
+        left.setSpacing(4)
+
+        self._llm_name_label = QLabel("LLM: -")
+        self._llm_name_label.setObjectName("MonoInfo")
+        self._llm_name_label.setStyleSheet("font-weight:700; font-size:13px;")
+        left.addWidget(self._llm_name_label)
+
+        self._llm_detail_label = QLabel(
+            "Size: -   |   Compute: -   |   Quant: -"
+        )
+        self._llm_detail_label.setObjectName("MonoInfo")
+        self._llm_detail_label.setStyleSheet("color:#8fa6c3; font-size:11px;")
+        left.addWidget(self._llm_detail_label)
+
         self._inference_label = QLabel(
-            "LLM: -\nLatency: -\nTokens/sec: -\nTTFT: -\nContext: -"
+            "Latency: -\nTokens/sec: -\nTTFT: -\nContext: -"
         )
         self._inference_label.setObjectName("MonoInfo")
-        self._inference_label.setFixedWidth(240)
-        il.addWidget(self._inference_label)
+        left.addWidget(self._inference_label)
+
+        left_w = QWidget()
+        left_w.setLayout(left)
+        left_w.setFixedWidth(280)
+        il.addWidget(left_w)
 
         self._preview = GhostPanel("Preview / Whiteboard / Vision Frame", height=220)
         il.addWidget(self._preview, 1)
@@ -152,9 +173,37 @@ class CenterPanel(BasePanel):
         text = data.get("text", "")
         self._activity_label.setText(text)
 
+    def _on_model_changed(self, data: dict) -> None:
+        name = data.get("model") or "-"
+        reg = data.get("registry", {})
+        mode = data.get("mode", "")
+
+        # Build display name:  "Llama 3 8B (GPU)"  or  "gpt-4o (Cloud)"
+        compute = reg.get("compute", "")
+        params = reg.get("parameters", "")
+        if compute:
+            display = f"{name} ({compute})"
+        else:
+            display = name
+        self._llm_name_label.setText(f"LLM: {display}")
+
+        # Detail line:  "Size: 4.5 GB  |  Compute: GPU  |  Quant: Q4_K_M"
+        size = reg.get("size_label", "-")
+        quant = reg.get("quant", "") or "-"
+        if mode == "online":
+            provider = reg.get("provider", data.get("provider", "-"))
+            model_id = reg.get("model_id", data.get("model_id", "-"))
+            detail = f"Provider: {provider}   |   Model: {model_id}"
+        else:
+            parts = [f"Size: {size}"]
+            if params:
+                parts.append(f"Params: {params}")
+            parts.append(f"Quant: {quant}")
+            detail = "   |   ".join(parts)
+        self._llm_detail_label.setText(detail)
+
     def _on_inference_metrics(self, data: dict) -> None:
         lines = [
-            f"LLM: {data.get('llm', '-')}",
             f"Latency: {data.get('latency', '-')}",
             f"Tokens/sec: {data.get('tokens_sec', '-')}",
             f"TTFT: {data.get('ttft', '-')}",

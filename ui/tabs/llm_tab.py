@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
 
 from core.config import Config
 from core.events import EventBus
+from core.llm_registry import LLMRegistry
 from core.plugin_manager import PluginManager
 from ui.widgets import ToggleSwitch
 
@@ -59,6 +60,7 @@ class LLMTab(BaseTab):
 
     def __init__(self, event_bus: EventBus, config: Config, plugin_manager: PluginManager):
         self._pm = plugin_manager
+        self._registry = LLMRegistry()
         super().__init__(event_bus, config)
 
     # ══════════════════════════════════════════════════════════
@@ -257,6 +259,7 @@ class LLMTab(BaseTab):
         file_name = Path(path).stem
         models.append({"name": file_name, "path": path, "address": ""})
         self._save_local_models(models)
+        self._registry.upsert_local(name=file_name, path=path)
         self._load_local_models()
 
         idx = self._local_combo.findData(path)
@@ -287,6 +290,9 @@ class LLMTab(BaseTab):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        reg_entry = self._registry.find_by_name(name)
+        if reg_entry:
+            self._registry.remove(reg_entry["id"])
         models.pop(idx)
         self._save_local_models(models)
         self._load_local_models()
@@ -301,6 +307,11 @@ class LLMTab(BaseTab):
         if not models or idx < 0 or idx >= len(models):
             return
 
+        old_name = models[idx]["name"]
+        reg_entry = self._registry.find_by_name(old_name)
+        if reg_entry:
+            self._registry.rename(reg_entry["id"], new_name)
+
         models[idx]["name"] = new_name
         self._save_local_models(models)
         self.config.set("llm.local_selected", new_name, save=False)
@@ -314,6 +325,10 @@ class LLMTab(BaseTab):
             return
         models[idx]["address"] = text
         self._save_local_models(models)
+        entry = models[idx]
+        self._registry.upsert_local(
+            name=entry["name"], path=entry["path"], address=text,
+        )
 
     def _on_local_selected(self, idx: int) -> None:
         models = self._get_local_models()
@@ -340,11 +355,13 @@ class LLMTab(BaseTab):
 
         self.config.set("llm.local_selected", entry["name"])
         self._update_local_details()
+        reg = self._registry.find_by_name(entry["name"]) or {}
         self.bus.publish("model_changed", {
             "model": entry["name"],
             "path": path,
             "address": entry.get("address", ""),
             "mode": "local",
+            "registry": reg,
         })
 
     def _update_local_details(self) -> None:
@@ -525,6 +542,7 @@ class LLMTab(BaseTab):
             "model_id": "",
         })
         self._save_online_models(models)
+        self._registry.upsert_online(name=name, provider=provider)
         self._load_online_models()
 
         idx = self._online_combo.findText(name)
@@ -554,6 +572,9 @@ class LLMTab(BaseTab):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        reg_entry = self._registry.find_by_name(name)
+        if reg_entry:
+            self._registry.remove(reg_entry["id"])
         models.pop(idx)
         self._save_online_models(models)
         self._load_online_models()
@@ -567,6 +588,11 @@ class LLMTab(BaseTab):
         models = self._get_online_models()
         if not models or idx < 0 or idx >= len(models):
             return
+
+        old_name = models[idx]["name"]
+        reg_entry = self._registry.find_by_name(old_name)
+        if reg_entry:
+            self._registry.rename(reg_entry["id"], new_name)
 
         models[idx]["name"] = new_name
         self._save_online_models(models)
@@ -583,11 +609,13 @@ class LLMTab(BaseTab):
         entry = models[idx]
         self.config.set("llm.online_selected", entry["name"])
         self._update_online_details()
+        reg = self._registry.find_by_name(entry["name"]) or {}
         self.bus.publish("model_changed", {
             "model": entry["name"],
             "provider": entry.get("provider", ""),
             "model_id": entry.get("model_id", ""),
             "mode": "online",
+            "registry": reg,
         })
 
     def _on_online_field_changed(self, *_args) -> None:
@@ -602,6 +630,13 @@ class LLMTab(BaseTab):
         models[idx]["endpoint"] = self._endpoint_edit.text()
         models[idx]["model_id"] = self._model_id_edit.text()
         self._save_online_models(models)
+        self._registry.upsert_online(
+            name=models[idx]["name"],
+            provider=models[idx]["provider"],
+            api_key=models[idx]["api_key"],
+            endpoint=models[idx]["endpoint"],
+            model_id=models[idx]["model_id"],
+        )
 
         # Update status hint
         prov = models[idx]["provider"]
