@@ -181,6 +181,31 @@ QPushButton#ModeButton:checked {
     color: #d8e1ee;
 }
 
+/* ── Profile combo (sidebar) ───────────────────────── */
+QComboBox#ProfileCombo {
+    background: #101824;
+    border: 1px solid #2a3b55;
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: #d8e1ee;
+    min-height: 26px;
+    font-size: 12px;
+}
+QComboBox#ProfileCombo:hover {
+    border-color: #3a5070;
+}
+QComboBox#ProfileCombo::drop-down {
+    border: none;
+    width: 20px;
+}
+QComboBox#ProfileCombo QAbstractItemView {
+    background: #101824;
+    border: 1px solid #2a3b55;
+    color: #d8e1ee;
+    selection-background-color: #1a2e44;
+    font-size: 12px;
+}
+
 /* ── Settings tab input widgets ─────────────────────── */
 QComboBox#SettingsCombo {
     background: #101824;
