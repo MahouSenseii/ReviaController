@@ -48,22 +48,6 @@ _PROFILE_TYPES = [
 ]
 
 
-class _ModeButton(QPushButton):
-    """Flat selectable button used for Modes."""
-
-    def __init__(self, text: str, group: str, event_bus: EventBus):
-        super().__init__(text)
-        self._group = group
-        self._bus = event_bus
-        self.setCheckable(True)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setObjectName("ModeButton")
-        self.clicked.connect(self._on_click)
-
-    def _on_click(self) -> None:
-        self._bus.publish(f"{self._group}_selected", {"value": self.text()})
-
-
 class SidebarPanel(BasePanel):
     """Left-hand sidebar: avatar, monitoring indicators, profiles."""
 
@@ -115,16 +99,6 @@ class SidebarPanel(BasePanel):
         self._vision_pill.toggled.connect(lambda on: self.bus.publish("vision_toggled", {"enabled": on}))
         lay.addWidget(self._vision_pill)
 
-        # ── Modes ─────────────────────────────────────────────
-        lay.addSpacing(14)
-        lay.addWidget(SectionLabel("Modes"))
-
-        self._mode_buttons: list[_ModeButton] = []
-        for label in ("Passive (Background)", "Interactive (Voice)", "Teaching / Explain", "Debug"):
-            btn = _ModeButton(label, "mode", self.bus)
-            self._mode_buttons.append(btn)
-            lay.addWidget(btn)
-
         # ── Profiles dropdown ─────────────────────────────────
         lay.addSpacing(14)
         lay.addWidget(SectionLabel("Profiles"))
@@ -162,7 +136,6 @@ class SidebarPanel(BasePanel):
         lay.addStretch(1)
 
         # ── Wire up events ────────────────────────────────────
-        self.bus.subscribe("mode_selected", self._on_mode_selected)
         self.bus.subscribe("module_status", self._on_module_status)
 
         # ── Initialise data ───────────────────────────────────
@@ -338,16 +311,6 @@ class SidebarPanel(BasePanel):
 
         self._load_profiles()
         self.bus.publish("profile_selected", {"value": None, "type": None})
-
-    # ══════════════════════════════════════════════════════════
-    # Mode handlers
-    # ══════════════════════════════════════════════════════════
-
-    def _on_mode_selected(self, data: dict) -> None:
-        value = data.get("value")
-        for btn in self._mode_buttons:
-            btn.setChecked(btn.text() == value)
-        self.config.set("mode", value)
 
     # ══════════════════════════════════════════════════════════
     # Module status (from backend / plugins)
