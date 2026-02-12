@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QWidget
 from core.config import Config
 from core.events import EventBus
 from core.plugin_manager import PluginManager
+from core.emotion_engine import EmotionEngine
 from ui.panels import CenterPanel, SettingsPanel, SidebarPanel
 from ui.style import DARK_STYLE
 
@@ -22,6 +23,7 @@ class MainWindow(QMainWindow):
         event_bus: EventBus,
         config: Config,
         plugin_manager: PluginManager,
+        emotion_engine: EmotionEngine | None = None,
     ):
         super().__init__()
         self.setWindowTitle("Revia Controller")
@@ -30,6 +32,7 @@ class MainWindow(QMainWindow):
         self.bus = event_bus
         self.config = config
         self.pm = plugin_manager
+        self.emotion_engine = emotion_engine
 
         root = QWidget()
         self.setCentralWidget(root)

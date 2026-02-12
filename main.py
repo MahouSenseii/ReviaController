@@ -10,7 +10,7 @@ import sys
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
 
-from core import Config, EventBus, PluginManager
+from core import Config, EventBus, PluginManager, EmotionEngine
 from main_window import MainWindow
 
 
@@ -24,8 +24,11 @@ def main() -> None:
     pm = PluginManager(bus, plugin_package="plugins")
     pm.discover()
 
+    # Emotion engine — gives the AI a living emotional state
+    emotion_engine = EmotionEngine(bus)
+
     # Main window
-    window = MainWindow(bus, config, pm)
+    window = MainWindow(bus, config, pm, emotion_engine)
     window.show()
 
     sys.exit(app.exec())
