@@ -14,6 +14,8 @@ from core import (
     Config, EventBus, PluginManager,
     EmotionEngine, RAGEngine, SafetyFilterEngine,
     AVPipeline,
+    ContinuityTracker, PersonaController, IntentMemory,
+    RepairMemory, RecallPolicy,
 )
 from main_window import MainWindow
 
@@ -44,12 +46,34 @@ def main() -> None:
         safety_filter=safety_filter,
     )
 
+    # Conversation continuity — tracks threads, commitments, tasks
+    continuity_tracker = ContinuityTracker(bus)
+
+    # Persona consistency — monitors style drift
+    persona_controller = PersonaController(bus)
+
+    # Intent memory — inferred user goals and needs
+    intent_memory = IntentMemory(bus)
+
+    # Repair memory — tracks corrections and feedback
+    repair_memory = RepairMemory(bus)
+
+    # Recall policy — controls when/how to inject memories
+    recall_policy = RecallPolicy(bus)
+
     # Main window
     window = MainWindow(
         bus, config, pm,
         emotion_engine, rag_engine, safety_filter,
         av_pipeline,
     )
+
+    # Store references so they don't get garbage-collected
+    window._continuity_tracker = continuity_tracker
+    window._persona_controller = persona_controller
+    window._intent_memory = intent_memory
+    window._repair_memory = repair_memory
+    window._recall_policy = recall_policy
     window.show()
 
     sys.exit(app.exec())

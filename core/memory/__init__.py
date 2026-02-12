@@ -19,3 +19,8 @@ from .memory_store import (
     ENTRY_TYPE_SUMMARY,
 )
 from .rag_engine import RAGEngine, RAGConfig
+from .continuity import ContinuityTracker, ContinuityConfig
+from .persona import PersonaController, PersonaConfig, PersonaProfile
+from .intent import IntentMemory, IntentConfig, InferenceType, ConfidenceLevel
+from .repair import RepairMemory, RepairConfig, CorrectionType, FeedbackSentiment
+from .recall_policy import RecallPolicy, RecallPolicyConfig, RecallMode

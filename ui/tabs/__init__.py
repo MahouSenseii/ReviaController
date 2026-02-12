@@ -5,3 +5,9 @@ from .voice_vision_tab import VoiceVisionTab
 from .filters_tab import FiltersTab
 from .logs_tab import LogsTab
 from .system_tab import SystemTab
+from .memory_tab import MemoryTab
+from .retrieval_tab import RetrievalTab
+from .relationship_tab import RelationshipTab
+from .eval_tab import EvalTab
+from .resources_tab import ResourcesTab
+from .control_tab import ControlTab
