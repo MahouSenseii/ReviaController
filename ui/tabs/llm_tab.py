@@ -371,7 +371,7 @@ class LLMTab(BaseTab):
     def _update_local_details(self) -> None:
         idx = self._local_combo.currentIndex()
         models = self._get_local_models()
-        has = models and 0 <= idx < len(models)
+        has = bool(models and 0 <= idx < len(models))
 
         self._local_remove_btn.setEnabled(has)
         self._local_rename_btn.setEnabled(has)
@@ -663,7 +663,7 @@ class LLMTab(BaseTab):
     def _update_online_details(self) -> None:
         idx = self._online_combo.currentIndex()
         models = self._get_online_models()
-        has = models and 0 <= idx < len(models)
+        has = bool(models and 0 <= idx < len(models))
 
         self._online_remove_btn.setEnabled(has)
         self._online_rename_btn.setEnabled(has)
