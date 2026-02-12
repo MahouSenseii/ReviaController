@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 from core.config import Config
 from core.events import EventBus
 from ui.widgets import GhostPanel, make_panel, panel_inner
+from ui.av_indicators import AVStatusBar
 
 from .base_panel import BasePanel
 
