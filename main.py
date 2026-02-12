@@ -1,26 +1,33 @@
-﻿"""
-AI Runtime UI - Entry Point
-This file only starts the application
+"""
+Revia Controller — Entry Point
+
+Creates the shared infrastructure (EventBus, Config, PluginManager),
+discovers plugins, and launches the UI.
 """
 
 import sys
-from PyQt6.QtWidgets import QApplication
+
 from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import QApplication
+
+from core import Config, EventBus, PluginManager
 from main_window import MainWindow
 
 
-def main():
-    """Application entry point"""
+def main() -> None:
     app = QApplication(sys.argv)
-
-    # Set application-wide font
     app.setFont(QFont("Segoe UI", 10))
 
-    # Create and show main window
-    window = MainWindow()
+    # Shared infrastructure
+    bus = EventBus()
+    config = Config(bus)
+    pm = PluginManager(bus, plugin_package="plugins")
+    pm.discover()
+
+    # Main window
+    window = MainWindow(bus, config, pm)
     window.show()
 
-    # Start event loop
     sys.exit(app.exec())
 
 
