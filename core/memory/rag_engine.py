@@ -164,6 +164,12 @@ class RAGEngine:
         memory_type: str = "short_term",
         tags: Optional[List[str]] = None,
         profile: Optional[str] = None,
+        *,
+        entry_type: str = "event",
+        emotion_valence: Optional[float] = None,
+        emotion_arousal: Optional[float] = None,
+        user_id: Optional[str] = None,
+        ttl_days: Optional[float] = None,
     ) -> Optional[str]:
         """
         Store a memory in the specified (or active) profile.
@@ -180,6 +186,11 @@ class RAGEngine:
             importance=importance,
             tags=tags,
             memory_type=memory_type,
+            entry_type=entry_type,
+            emotion_valence=emotion_valence,
+            emotion_arousal=emotion_arousal,
+            user_id=user_id,
+            ttl_days=ttl_days,
         )
 
         self._publish_update(mem)
@@ -210,6 +221,10 @@ class RAGEngine:
         importance: float = 0.4,
         tags: Optional[List[str]] = None,
         profile: Optional[str] = None,
+        *,
+        emotion_valence: Optional[float] = None,
+        emotion_arousal: Optional[float] = None,
+        user_id: Optional[str] = None,
     ) -> Optional[tuple[str, str]]:
         """Store both sides of a conversation turn."""
         mem = self._get_memory(profile)
@@ -221,6 +236,9 @@ class RAGEngine:
             assistant_response=assistant_response,
             importance=importance,
             tags=tags,
+            emotion_valence=emotion_valence,
+            emotion_arousal=emotion_arousal,
+            user_id=user_id,
         )
 
         self._publish_update(mem)
@@ -236,12 +254,17 @@ class RAGEngine:
         include_long_term: bool = True,
         tags: Optional[List[str]] = None,
         profile: Optional[str] = None,
+        *,
+        emotion_valence: Optional[float] = None,
+        emotion_arousal: Optional[float] = None,
+        entry_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Retrieve relevant memories for *query*.
 
         Returns a list of dicts with ``content``, ``score``,
-        ``source``, ``memory_type``, ``importance``, ``tags``.
+        ``source``, ``memory_type``, ``importance``, ``tags``,
+        ``entry_type``, ``emotion_valence``, ``emotion_arousal``.
         """
         mem = self._get_memory(profile)
         if mem is None:
@@ -254,6 +277,9 @@ class RAGEngine:
             include_long_term=include_long_term,
             min_similarity=self.cfg.min_similarity,
             tags=tags,
+            emotion_valence=emotion_valence,
+            emotion_arousal=emotion_arousal,
+            entry_types=entry_types,
         )
 
         return [
@@ -265,6 +291,10 @@ class RAGEngine:
                 "memory_type": r.entry.metadata.get("memory_type", "unknown"),
                 "importance": r.entry.metadata.get("importance", 0.5),
                 "tags": r.entry.metadata.get("tags", []),
+                "entry_type": r.entry.metadata.get("entry_type", "event"),
+                "emotion_valence": r.entry.metadata.get("emotion_valence"),
+                "emotion_arousal": r.entry.metadata.get("emotion_arousal"),
+                "session_id": r.entry.metadata.get("session_id", ""),
             }
             for r in results
         ]
@@ -274,6 +304,9 @@ class RAGEngine:
         query: str,
         top_k: Optional[int] = None,
         profile: Optional[str] = None,
+        *,
+        emotion_valence: Optional[float] = None,
+        emotion_arousal: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Build a structured RAG context dict for LLM prompt injection.
@@ -285,6 +318,8 @@ class RAGEngine:
             query=query,
             top_k=top_k,
             profile=profile,
+            emotion_valence=emotion_valence,
+            emotion_arousal=emotion_arousal,
         )
 
         mem = self._get_memory(profile)
@@ -359,7 +394,34 @@ class RAGEngine:
             self._publish_update(mem)
         return count
 
+    # ── Consolidation ─────────────────────────────────────────
+
+    def consolidate(
+        self,
+        summarizer=None,
+        profile: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run the memory consolidation pipeline on the active/specified profile."""
+        mem = self._get_memory(profile)
+        if mem is None:
+            return {"error": "no active profile"}
+        result = mem.consolidate(summarizer=summarizer)
+        self._publish_update(mem)
+        if self.bus:
+            self.bus.publish("memory_consolidated", {
+                "profile": mem.profile_name,
+                "result": result,
+            })
+        return result
+
     # ── Session management ───────────────────────────────────
+
+    def new_session(self, profile: Optional[str] = None) -> Optional[str]:
+        """Start a new session for the active/specified profile."""
+        mem = self._get_memory(profile)
+        if mem is None:
+            return None
+        return mem.new_session()
 
     def end_session(self, profile: Optional[str] = None) -> None:
         """
@@ -403,8 +465,11 @@ class RAGEngine:
             {
                 "role": "user" | "assistant",
                 "content": "the message text",
-                "importance": 0.5,  # optional
-                "tags": ["topic"],  # optional
+                "importance": 0.5,      # optional
+                "tags": ["topic"],       # optional
+                "emotion_valence": 0.3,  # optional, from EmotionEngine
+                "emotion_arousal": 0.5,  # optional
+                "user_id": "...",        # optional
             }
         """
         if not self.cfg.auto_store_chat:
@@ -423,12 +488,18 @@ class RAGEngine:
         source = "user" if role == "user" else "assistant"
         prefix = "User said" if role == "user" else "Assistant said"
 
-        self.store(
+        mem = self._active_memory
+        mem.remember(
             content=f"{prefix}: {content}",
             source=source,
             importance=importance,
             tags=tags,
+            entry_type="conversation",
+            emotion_valence=data.get("emotion_valence"),
+            emotion_arousal=data.get("emotion_arousal"),
+            user_id=data.get("user_id"),
         )
+        self._publish_update(mem)
 
     def _on_memory_command(self, data: Dict[str, Any]) -> None:
         """
@@ -464,6 +535,10 @@ class RAGEngine:
             if mem:
                 mem.promote(data.get("entry_id", ""))
                 self._publish_update(mem)
+        elif action == "consolidate":
+            self.consolidate()
+        elif action == "new_session":
+            self.new_session()
 
     # ── Internal helpers ─────────────────────────────────────
 
