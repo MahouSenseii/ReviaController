@@ -30,11 +30,33 @@ from ui.widgets import Pill, SectionLabel, StatusDot
 
 from .base_panel import BasePanel
 
+# Master list of available emotions for new profiles
+_DEFAULT_EMOTIONS = [
+    "affectionate", "afraid", "amused", "angry", "annoyed", "anxious",
+    "apathetic", "ashamed", "awkward", "bitter", "bored", "bratty",
+    "calm", "compassionate", "confident", "confused", "content", "curious",
+    "depressed", "determined", "disappointed", "disinterested", "drained",
+    "embarrassed", "empty", "enraged", "exhausted", "flustered", "frustrated",
+    "grief", "grounded", "guilty", "happy", "heartbroken", "hopeful",
+    "hopeless", "insecure", "inspired", "interested", "jealous", "joyful",
+    "lonely", "loving", "mischievous", "motivated", "nervous", "numb",
+    "peaceful", "playful", "proud", "relaxed", "resentful", "sad",
+    "sarcastic", "sassy", "satisfied", "scared", "shocked", "shy",
+    "sleepy", "surprised", "teasing", "terrified", "thankful", "tired",
+    "worried",
+]
+
 # Default profile created on first launch
 _DEFAULT_PROFILE = {
     "name": "Astra",
     "type": "Assistant",
     "avatar": "assets/avatar.png",
+    "creator": "",
+    "persona": "",
+    "example_dialogue": "",
+    "fallback_message": "Something is wrong with my AI. Please wait...",
+    "emotions": list(_DEFAULT_EMOTIONS),
+    "weights": {},
 }
 
 # Available role types for the "Add Profile" dialog
@@ -137,6 +159,7 @@ class SidebarPanel(BasePanel):
 
         # ── Wire up events ────────────────────────────────────
         self.bus.subscribe("module_status", self._on_module_status)
+        self.bus.subscribe("profile_updated", self._on_profile_updated)
 
         # ── Initialise data ───────────────────────────────────
         self._ensure_default_profile()
@@ -233,7 +256,13 @@ class SidebarPanel(BasePanel):
         self._apply_active_profile()
         self.bus.publish("profile_selected", {
             "value": p["name"],
-            "type": p["type"],
+            "type": p.get("type", "Assistant"),
+            "creator": p.get("creator", ""),
+            "persona": p.get("persona", ""),
+            "example_dialogue": p.get("example_dialogue", ""),
+            "fallback_message": p.get("fallback_message", ""),
+            "emotions": p.get("emotions", []),
+            "weights": p.get("weights", {}),
         })
 
     def _on_profile_add(self) -> None:
@@ -267,6 +296,12 @@ class SidebarPanel(BasePanel):
             "name": name,
             "type": ptype,
             "avatar": "assets/avatar.png",
+            "creator": "",
+            "persona": "",
+            "example_dialogue": "",
+            "fallback_message": "Something is wrong with my AI. Please wait...",
+            "emotions": list(_DEFAULT_EMOTIONS),
+            "weights": {},
         })
         self._save_profiles(profiles)
         self._load_profiles()
@@ -311,6 +346,14 @@ class SidebarPanel(BasePanel):
 
         self._load_profiles()
         self.bus.publish("profile_selected", {"value": None, "type": None})
+
+    # ══════════════════════════════════════════════════════════
+    # Profile sync (from Character tab)
+    # ══════════════════════════════════════════════════════════
+
+    def _on_profile_updated(self, data: dict) -> None:
+        """Refresh sidebar when the Character tab edits the active profile."""
+        self._load_profiles()
 
     # ══════════════════════════════════════════════════════════
     # Module status (from backend / plugins)

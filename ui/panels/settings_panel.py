@@ -14,6 +14,7 @@ from core.events import EventBus
 from core.plugin_manager import PluginManager
 from ui.tabs import (
     BehaviorTab,
+    CharacterTab,
     FiltersTab,
     LLMTab,
     LogsTab,
@@ -45,6 +46,7 @@ class SettingsPanel(BasePanel):
         self._tabs = QTabWidget()
         self._tabs.setObjectName("RightTabs")
 
+        self._character_tab = CharacterTab(self.bus, self.config)
         self._behavior_tab = BehaviorTab(self.bus, self.config)
         self._llm_tab = LLMTab(self.bus, self.config, self._plugin_manager)
         self._voice_vision_tab = VoiceVisionTab(self.bus, self.config)
@@ -52,6 +54,7 @@ class SettingsPanel(BasePanel):
         self._logs_tab = LogsTab(self.bus, self.config)
         self._system_tab = SystemTab(self.bus, self.config)
 
+        self._tabs.addTab(self._character_tab, "Character")
         self._tabs.addTab(self._behavior_tab, "Behavior")
         self._tabs.addTab(self._llm_tab, "LLM")
         self._tabs.addTab(self._voice_vision_tab, "Voice && Vision")

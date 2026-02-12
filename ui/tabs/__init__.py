@@ -1,5 +1,6 @@
 from .base_tab import BaseTab
 from .behavior_tab import BehaviorTab
+from .character_tab import CharacterTab
 from .llm_tab import LLMTab
 from .voice_vision_tab import VoiceVisionTab
 from .filters_tab import FiltersTab
