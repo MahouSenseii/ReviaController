@@ -10,7 +10,11 @@ import sys
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
 
-from core import Config, EventBus, PluginManager, EmotionEngine, RAGEngine, SafetyFilterEngine
+from core import (
+    Config, EventBus, PluginManager,
+    EmotionEngine, RAGEngine, SafetyFilterEngine,
+    AVPipeline,
+)
 from main_window import MainWindow
 
 
@@ -33,8 +37,19 @@ def main() -> None:
     # Safety filter — input/output content filtering
     safety_filter = SafetyFilterEngine(bus, config)
 
+    # AV pipeline — STT, TTS, Vision orchestration
+    av_pipeline = AVPipeline(
+        bus,
+        emotion_engine=emotion_engine,
+        safety_filter=safety_filter,
+    )
+
     # Main window
-    window = MainWindow(bus, config, pm, emotion_engine, rag_engine, safety_filter)
+    window = MainWindow(
+        bus, config, pm,
+        emotion_engine, rag_engine, safety_filter,
+        av_pipeline,
+    )
     window.show()
 
     sys.exit(app.exec())

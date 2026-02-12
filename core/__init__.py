@@ -8,3 +8,7 @@ from .emotion_nn import EmotionNeuralNetwork
 from .emotion_engine import EmotionEngine, EmotionEngineConfig, Stimulus
 from .memory import RAGEngine, RAGConfig
 from .safety import SafetyFilterEngine, FilterResult
+from .stt import STTEngine, STTConfig
+from .tts import TTSEngine, TTSConfig
+from .vision import VisionEngine, VisionConfig
+from .av import AVPipeline, AVPipelineConfig

@@ -4,3 +4,5 @@ __pycache__/
 config.json
 .idea/
 safety_logs/
+native/build/
+memory_data/

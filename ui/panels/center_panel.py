@@ -34,6 +34,10 @@ class CenterPanel(BasePanel):
         self._topbar = self._make_topbar()
         lay.addWidget(self._topbar, 0)
 
+        # ── AV Status indicators ────────────────────────────
+        self._av_bar = AVStatusBar(self.bus)
+        lay.addWidget(self._av_bar, 0)
+
         # ── Assistant status ──────────────────────────────────
         status_panel = self._make_status_section()
         lay.addWidget(status_panel, 0)
@@ -52,6 +56,13 @@ class CenterPanel(BasePanel):
         self.bus.subscribe("activity_log", self._on_activity_log)
         self.bus.subscribe("inference_metrics", self._on_inference_metrics)
         self.bus.subscribe("model_changed", self._on_model_changed)
+
+        # AV status updates → assistant status label
+        self.bus.subscribe("stt_state_changed", self._on_av_status)
+        self.bus.subscribe("tts_state_changed", self._on_av_status)
+        self.bus.subscribe("vision_state_changed", self._on_av_status)
+        self.bus.subscribe("stt_transcription", self._on_stt_transcription)
+        self.bus.subscribe("tts_speaking", self._on_tts_speaking)
 
     # ── Section builders ──────────────────────────────────────
 
@@ -211,3 +222,28 @@ class CenterPanel(BasePanel):
             f"Context: {data.get('context', '-')}",
         ]
         self._inference_label.setText("\n".join(lines))
+
+    # ── AV event handlers ──────────────────────────────────────
+
+    def _on_av_status(self, data: dict) -> None:
+        """Rebuild the assistant status lines from current AV states."""
+        # Read state from the AV status bar indicators
+        stt = self._av_bar.stt_indicator._label.text()
+        tts = self._av_bar.tts_indicator._label.text()
+        vis = self._av_bar.vision_indicator._label.text()
+        self._status_label.setText(f"• {stt}\n• {tts}\n• {vis}")
+
+    def _on_stt_transcription(self, data: dict) -> None:
+        text = data.get("text", "")
+        if text:
+            current = self._activity_label.text()
+            new_line = f'User (voice): "{text}"'
+            self._activity_label.setText(f"{current}\n{new_line}")
+
+    def _on_tts_speaking(self, data: dict) -> None:
+        text = data.get("text", "")
+        if text:
+            snippet = text[:80] + ("..." if len(text) > 80 else "")
+            current = self._activity_label.text()
+            new_line = f'AI (speaking): "{snippet}"'
+            self._activity_label.setText(f"{current}\n{new_line}")

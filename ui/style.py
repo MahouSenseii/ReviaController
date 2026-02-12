@@ -286,4 +286,24 @@ QLabel#TabHeading {
     background: transparent;
     border: none;
 }
+
+/* ── AV Status Bar ────────────────────────────────────── */
+QFrame#AVStatusBar {
+    background: #101824;
+    border: 1px solid #1e2d42;
+    border-radius: 8px;
+}
+
+QFrame#AVIndicator {
+    background: transparent;
+    border: none;
+}
+
+QLabel#AVIndicatorLabel {
+    color: #c7d3e6;
+    font-size: 12px;
+    font-weight: 600;
+    background: transparent;
+    border: none;
+}
 """
