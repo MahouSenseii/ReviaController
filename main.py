@@ -10,7 +10,7 @@ import sys
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
 
-from core import Config, EventBus, PluginManager, EmotionEngine, RAGEngine
+from core import Config, EventBus, PluginManager, EmotionEngine, RAGEngine, SafetyFilterEngine
 from main_window import MainWindow
 
 
@@ -30,8 +30,11 @@ def main() -> None:
     # RAG memory — profile-isolated short-term + long-term memory
     rag_engine = RAGEngine(bus)
 
+    # Safety filter — input/output content filtering
+    safety_filter = SafetyFilterEngine(bus, config)
+
     # Main window
-    window = MainWindow(bus, config, pm, emotion_engine, rag_engine)
+    window = MainWindow(bus, config, pm, emotion_engine, rag_engine, safety_filter)
     window.show()
 
     sys.exit(app.exec())

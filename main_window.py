@@ -13,6 +13,7 @@ from core.events import EventBus
 from core.plugin_manager import PluginManager
 from core.emotion_engine import EmotionEngine
 from core.memory.rag_engine import RAGEngine
+from core.safety.filter_engine import SafetyFilterEngine
 from ui.panels import CenterPanel, SettingsPanel, SidebarPanel
 from ui.style import DARK_STYLE
 
@@ -26,6 +27,7 @@ class MainWindow(QMainWindow):
         plugin_manager: PluginManager,
         emotion_engine: EmotionEngine | None = None,
         rag_engine: RAGEngine | None = None,
+        safety_filter: SafetyFilterEngine | None = None,
     ):
         super().__init__()
         self.setWindowTitle("Revia Controller")
@@ -36,6 +38,7 @@ class MainWindow(QMainWindow):
         self.pm = plugin_manager
         self.emotion_engine = emotion_engine
         self.rag_engine = rag_engine
+        self.safety_filter = safety_filter
 
         root = QWidget()
         self.setCentralWidget(root)
