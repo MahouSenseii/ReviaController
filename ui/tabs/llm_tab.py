@@ -36,7 +36,7 @@ from core.config import Config
 from core.events import EventBus
 from core.llm_registry import LLMRegistry
 from core.plugin_manager import PluginManager
-from ui.widgets import ToggleSwitch
+from ui.widgets import StatusDot, ToggleSwitch
 
 from .base_tab import BaseTab
 
@@ -69,6 +69,53 @@ class LLMTab(BaseTab):
 
     def _build(self) -> None:
         lay = self._layout
+
+        # ── Backend selection (plugin) ────────────────────────
+        lay.addWidget(self._heading("Backend"))
+
+        self._backend_combo = QComboBox()
+        self._backend_combo.setObjectName("SettingsCombo")
+        self._backend_combo.setMinimumHeight(28)
+        self._populate_backends()
+        lay.addWidget(self._row("Server", self._backend_combo))
+
+        # Connect / Disconnect row
+        conn_row = QWidget()
+        ch = QHBoxLayout(conn_row)
+        ch.setContentsMargins(0, 0, 0, 0)
+        ch.setSpacing(8)
+
+        self._connect_btn = QPushButton("Connect")
+        self._connect_btn.setObjectName("ModeButton")
+        self._connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._connect_btn.clicked.connect(self._on_connect)
+        ch.addWidget(self._connect_btn)
+
+        self._disconnect_btn = QPushButton("Disconnect")
+        self._disconnect_btn.setObjectName("ModeButton")
+        self._disconnect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._disconnect_btn.setStyleSheet(
+            "QPushButton { color:#ef476f; } QPushButton:hover { border-color:#ef476f; }"
+        )
+        self._disconnect_btn.setEnabled(False)
+        self._disconnect_btn.clicked.connect(self._on_disconnect)
+        ch.addWidget(self._disconnect_btn)
+
+        self._conn_dot = StatusDot("off", size=10)
+        ch.addWidget(self._conn_dot, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        ch.addStretch(1)
+        lay.addWidget(conn_row)
+
+        self._conn_status_label = QLabel("Not connected")
+        self._conn_status_label.setStyleSheet("color:#8fa6c3; font-size:11px; padding:2px 0;")
+        lay.addWidget(self._conn_status_label)
+
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color:#263246;")
+        lay.addWidget(sep)
 
         # ── Mode toggle (Local ↔ Online) ─────────────────────
         mode_row = QWidget()
@@ -709,3 +756,109 @@ class LLMTab(BaseTab):
             self._model_id_edit.clear()
             self._model_id_edit.blockSignals(False)
             self._online_status.setText("")
+
+    # ══════════════════════════════════════════════════════════
+    # Backend (plugin) management
+    # ══════════════════════════════════════════════════════════
+
+    # Plugin name → user-friendly display label
+    _BACKEND_LABELS: dict[str, str] = {
+        "ollama_plugin":   "Ollama (Local)",
+        "llamacpp_plugin": "llama.cpp (Local)",
+        "lmstudio_plugin": "LM Studio (Local)",
+        "openai_plugin":   "OpenAI API (Online)",
+        "example_plugin":  "Example (Offline Stub)",
+    }
+
+    def _populate_backends(self) -> None:
+        """Fill the backend dropdown with discovered plugins."""
+        self._backend_combo.clear()
+        available = self._pm.available
+        for name in available:
+            label = self._BACKEND_LABELS.get(name, name)
+            self._backend_combo.addItem(label, name)
+
+        # Restore last used backend
+        last = self.config.get("llm.backend", "")
+        if last:
+            idx = self._backend_combo.findData(last)
+            if idx >= 0:
+                self._backend_combo.setCurrentIndex(idx)
+
+    def _on_connect(self) -> None:
+        """Activate the selected plugin and connect it."""
+        idx = self._backend_combo.currentIndex()
+        if idx < 0:
+            return
+
+        plugin_name = self._backend_combo.currentData()
+        if not plugin_name:
+            return
+
+        # Build config from current UI state
+        cfg: dict = {}
+        is_online = self.config.get("llm.mode", "local") == "online"
+
+        if is_online:
+            models = self._get_online_models()
+            oidx = self._online_combo.currentIndex()
+            if models and 0 <= oidx < len(models):
+                entry = models[oidx]
+                cfg["api_key"] = entry.get("api_key", "")
+                cfg["base_url"] = entry.get("endpoint", "")
+                cfg["provider"] = entry.get("provider", "")
+                cfg["model_id"] = entry.get("model_id", "")
+        else:
+            models = self._get_local_models()
+            lidx = self._local_combo.currentIndex()
+            if models and 0 <= lidx < len(models):
+                entry = models[lidx]
+                cfg["base_url"] = entry.get("address", "")
+
+        try:
+            plugin = self._pm.activate(plugin_name, cfg)
+            self.config.set("llm.backend", plugin_name)
+            self._conn_dot.set_status("on")
+            self._conn_status_label.setText(f"Connected: {plugin.name}")
+            self._conn_status_label.setStyleSheet(
+                "color:#33d17a; font-size:11px; padding:2px 0;"
+            )
+            self._connect_btn.setEnabled(False)
+            self._disconnect_btn.setEnabled(True)
+
+            # If online mode, select model by model_id
+            if is_online and cfg.get("model_id"):
+                try:
+                    plugin.select_model(cfg["model_id"])
+                except Exception:
+                    pass
+
+            self.bus.publish("log_entry", {
+                "category": "Allowed",
+                "text": f"Connected to {plugin.name}",
+            })
+        except Exception as e:
+            self._conn_dot.set_status("off")
+            self._conn_status_label.setText(f"Failed: {e}")
+            self._conn_status_label.setStyleSheet(
+                "color:#ef476f; font-size:11px; padding:2px 0;"
+            )
+            self.bus.publish("log_entry", {
+                "category": "Filtered",
+                "text": f"Connection failed: {e}",
+            })
+
+    def _on_disconnect(self) -> None:
+        """Deactivate the current plugin."""
+        self._pm.deactivate()
+        self._conn_dot.set_status("off")
+        self._conn_status_label.setText("Disconnected")
+        self._conn_status_label.setStyleSheet(
+            "color:#8fa6c3; font-size:11px; padding:2px 0;"
+        )
+        self._connect_btn.setEnabled(True)
+        self._disconnect_btn.setEnabled(False)
+        self.bus.publish("log_entry", {
+            "category": "Allowed",
+            "text": "Disconnected from AI backend",
+        })

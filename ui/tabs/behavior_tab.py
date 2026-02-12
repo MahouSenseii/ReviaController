@@ -63,6 +63,16 @@ class BehaviorTab(BaseTab):
         if idx >= 0:
             self._persona_combo.setCurrentIndex(idx)
 
+        verbosity = self.config.get("behavior.verbosity", "Medium")
+        idx = self._verbosity.findText(verbosity)
+        if idx >= 0:
+            self._verbosity.setCurrentIndex(idx)
+
+        style = self.config.get("behavior.response_style", "Conversational")
+        idx = self._response_style.findText(style)
+        if idx >= 0:
+            self._response_style.setCurrentIndex(idx)
+
         prompt = self.config.get("behavior.system_prompt", "")
         if prompt:
             self._sys_prompt.setPlainText(prompt)

@@ -2,9 +2,9 @@
 Left sidebar panel — AI monitoring dashboard.
 
 Shows the active assistant's avatar, name / type, live module-status
-indicators (STT, TTS, Vision) with coloured lights, and a profile
-dropdown that lets the user switch between or manage AI assistant
-profiles.
+indicators (STT, TTS, Vision) with coloured lights, emotion state
+display, and a profile dropdown that lets the user switch between or
+manage AI assistant profiles.
 
 Publishes events when the user toggles modules or switches profiles.
 """
@@ -14,11 +14,13 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -102,6 +104,10 @@ class SidebarPanel(BasePanel):
         lay.addWidget(name_row)
         lay.addSpacing(6)
 
+        # ── Emotion display ───────────────────────────────────
+        self._emotion_widget = self._build_emotion_display()
+        lay.addWidget(self._emotion_widget)
+
         # ── Module status pills ──────────────────────────────
         self._stt_pill = Pill("STT", "Idle", status="off", toggle=True, checked=True)
         self._stt_pill.toggled.connect(lambda on: self.bus.publish("stt_toggled", {"enabled": on}))
@@ -119,9 +125,12 @@ class SidebarPanel(BasePanel):
         lay.addSpacing(14)
         lay.addWidget(SectionLabel("Modes"))
 
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
         self._mode_buttons: list[_ModeButton] = []
-        for label in ("Passive (Background)", "Interactive (Voice)", "Teaching / Explain", "Debug"):
+        for idx, label in enumerate(("Passive (Background)", "Interactive (Voice)", "Teaching / Explain", "Debug")):
             btn = _ModeButton(label, "mode", self.bus)
+            self._mode_group.addButton(btn, idx)
             self._mode_buttons.append(btn)
             lay.addWidget(btn)
 
@@ -164,10 +173,112 @@ class SidebarPanel(BasePanel):
         # ── Wire up events ────────────────────────────────────
         self.bus.subscribe("mode_selected", self._on_mode_selected)
         self.bus.subscribe("module_status", self._on_module_status)
+        self.bus.subscribe("emotion_state_changed", self._on_emotion_changed)
 
         # ── Initialise data ───────────────────────────────────
         self._ensure_default_profile()
         self._load_profiles()
+
+    # ══════════════════════════════════════════════════════════
+    # Emotion display
+    # ══════════════════════════════════════════════════════════
+
+    def _build_emotion_display(self) -> QWidget:
+        """Build a compact emotion state widget."""
+        w = QWidget()
+        w.setObjectName("EmotionDisplay")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 4, 0, 4)
+        lay.setSpacing(4)
+
+        lay.addWidget(SectionLabel("Emotional State"))
+
+        # Dominant emotion label
+        self._emotion_label = QLabel("Neutral")
+        self._emotion_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._emotion_label.setStyleSheet(
+            "font-weight:700; font-size:14px; color:#f9c74f; padding:2px 0;"
+        )
+        lay.addWidget(self._emotion_label)
+
+        # Mood label
+        self._mood_label = QLabel("Mood: neutral")
+        self._mood_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mood_label.setStyleSheet(
+            "font-size:11px; color:#8fa6c3; padding:0;"
+        )
+        lay.addWidget(self._mood_label)
+
+        # Top emotion bars (up to 3)
+        self._emotion_bars: list[tuple[QLabel, QProgressBar]] = []
+        for _ in range(3):
+            row = QWidget()
+            rh = QHBoxLayout(row)
+            rh.setContentsMargins(0, 0, 0, 0)
+            rh.setSpacing(6)
+
+            name_lbl = QLabel("-")
+            name_lbl.setFixedWidth(80)
+            name_lbl.setStyleSheet("font-size:11px; color:#c7d3e6;")
+            rh.addWidget(name_lbl)
+
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(0)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(8)
+            bar.setStyleSheet(
+                "QProgressBar { background:#0a0f18; border:1px solid #2a3b55; border-radius:4px; }"
+                "QProgressBar::chunk { background:#f9c74f; border-radius:3px; }"
+            )
+            rh.addWidget(bar, 1)
+
+            self._emotion_bars.append((name_lbl, bar))
+            lay.addWidget(row)
+
+        return w
+
+    def _on_emotion_changed(self, data: dict) -> None:
+        """Update the emotion display from emotion_state_changed event."""
+        dominant = data.get("dominant", "neutral")
+        intensity = data.get("dominant_intensity", 0.0)
+        colour = data.get("colour", "#f9c74f")
+        mood = data.get("mood", "neutral")
+        top = data.get("top_emotions", [])
+
+        # Dominant emotion
+        if intensity < 0.05:
+            self._emotion_label.setText("Neutral")
+            self._emotion_label.setStyleSheet(
+                "font-weight:700; font-size:14px; color:#8fa6c3; padding:2px 0;"
+            )
+        else:
+            display = f"{dominant.title()} ({intensity:.0%})"
+            self._emotion_label.setText(display)
+            self._emotion_label.setStyleSheet(
+                f"font-weight:700; font-size:14px; color:{colour}; padding:2px 0;"
+            )
+
+        # Mood
+        self._mood_label.setText(f"Mood: {mood}")
+
+        # Top emotion bars
+        for i, (name_lbl, bar) in enumerate(self._emotion_bars):
+            if i < len(top):
+                entry = top[i]
+                ename = entry.get("name", "-")
+                eintensity = entry.get("intensity", 0.0)
+                name_lbl.setText(ename)
+                bar.setValue(int(eintensity * 100))
+
+                # Colour the bar chunk based on intensity
+                bar.setStyleSheet(
+                    "QProgressBar { background:#0a0f18; border:1px solid #2a3b55; border-radius:4px; }"
+                    f"QProgressBar::chunk {{ background:{colour}; border-radius:3px; }}"
+                )
+            else:
+                name_lbl.setText("-")
+                bar.setValue(0)
 
     # ══════════════════════════════════════════════════════════
     # Profile helpers

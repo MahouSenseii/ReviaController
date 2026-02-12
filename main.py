@@ -7,10 +7,12 @@ discovers plugins, and launches the UI.
 
 import sys
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
 
-from core import Config, EventBus, PluginManager, EmotionEngine
+from core import Config, EventBus, PluginManager, EmotionEngine, ConversationManager
+from core.stimulus import StimulusAnalyser
 from main_window import MainWindow
 
 
@@ -26,6 +28,18 @@ def main() -> None:
 
     # Emotion engine — gives the AI a living emotional state
     emotion_engine = EmotionEngine(bus)
+
+    # Stimulus analyser — converts chat messages into emotion stimuli
+    stimulus_analyser = StimulusAnalyser(bus)
+
+    # Conversation manager — orchestrates chat turns
+    conversation = ConversationManager(bus, config, pm, emotion_engine)
+
+    # Emotion tick timer — natural decay every 2 seconds
+    tick_timer = QTimer()
+    tick_timer.setInterval(emotion_engine.cfg.tick_interval_ms)
+    tick_timer.timeout.connect(emotion_engine.tick)
+    tick_timer.start()
 
     # Main window
     window = MainWindow(bus, config, pm, emotion_engine)
