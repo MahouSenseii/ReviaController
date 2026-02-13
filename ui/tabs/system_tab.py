@@ -1,58 +1,26 @@
 """
-System tab — live hardware / resource gauges.
+System tab — live hardware monitoring chart.
 
-Subscribes to ``runtime_stats`` and ``inference_metrics`` and draws
-simple progress-bar style meters.
+Subscribes to ``runtime_stats`` and plots GPU, CPU, VRAM, and RAM
+usage over time as a rolling line chart.
 """
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (
-    QGridLayout,
-    QLabel,
-    QProgressBar,
-    QWidget,
-)
+from PyQt6.QtWidgets import QLabel
+
+from ui.charts import LiveChart
 
 from .base_tab import BaseTab
 
 
-class _Gauge(QWidget):
-    """Labelled progress bar for a single metric."""
-
-    def __init__(self, label: str, unit: str = "%"):
-        super().__init__()
-        self._unit = unit
-
-        layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-
-        self._label = QLabel(label)
-        self._label.setFixedWidth(60)
-        layout.addWidget(self._label, 0, 0)
-
-        self._bar = QProgressBar()
-        self._bar.setRange(0, 100)
-        self._bar.setValue(0)
-        self._bar.setTextVisible(False)
-        self._bar.setFixedHeight(14)
-        self._bar.setStyleSheet(
-            "QProgressBar { background:#0a0f18; border:1px solid #2a3b55; border-radius:7px; }"
-            "QProgressBar::chunk { background:#33d17a; border-radius:6px; }"
-        )
-        layout.addWidget(self._bar, 0, 1)
-
-        self._value_label = QLabel("- " + unit)
-        self._value_label.setFixedWidth(60)
-        self._value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        layout.addWidget(self._value_label, 0, 2)
-
-    def set_value(self, value: float) -> None:
-        clamped = max(0, min(100, int(value)))
-        self._bar.setValue(clamped)
-        self._value_label.setText(f"{value:.0f} {self._unit}")
+# Series colours matching the dark theme
+_SERIES = {
+    "GPU":  "#f9c74f",   # gold
+    "CPU":  "#43aa8b",   # teal
+    "VRAM": "#f4845f",   # coral
+    "RAM":  "#577590",   # slate blue
+}
 
 
 class SystemTab(BaseTab):
@@ -60,15 +28,20 @@ class SystemTab(BaseTab):
     def _build(self) -> None:
         lay = self._layout
 
-        lay.addWidget(self._heading("Hardware Monitors"))
+        lay.addWidget(self._heading("Hardware Monitor"))
 
-        self._gpu_gauge = _Gauge("GPU", "%")
-        self._cpu_gauge = _Gauge("CPU", "%")
-        self._vram_gauge = _Gauge("VRAM", "%")
-        self._ram_gauge = _Gauge("RAM", "%")
-
-        for g in (self._gpu_gauge, self._cpu_gauge, self._vram_gauge, self._ram_gauge):
-            lay.addWidget(g)
+        # Rolling line chart
+        self._hw_chart = LiveChart(
+            max_points=60,
+            y_min=0.0,
+            y_max=100.0,
+            y_label="%",
+            height=240,
+            show_legend=True,
+        )
+        for name, colour in _SERIES.items():
+            self._hw_chart.add_series(name, colour, width=2.0)
+        lay.addWidget(self._hw_chart)
 
         lay.addWidget(self._heading("Runtime Info"))
 
@@ -83,14 +56,13 @@ class SystemTab(BaseTab):
         self.bus.subscribe("runtime_stats", self._on_runtime_stats)
 
     def _on_runtime_stats(self, data: dict) -> None:
-        if "GPU" in data:
-            self._gpu_gauge.set_value(_pct(data["GPU"]))
-        if "CPU" in data:
-            self._cpu_gauge.set_value(_pct(data["CPU"]))
-        if "VRAM" in data:
-            self._vram_gauge.set_value(_pct(data["VRAM"]))
-        if "RAM" in data:
-            self._ram_gauge.set_value(_pct(data["RAM"]))
+        values: dict[str, float] = {}
+        for key in ("GPU", "CPU", "VRAM", "RAM"):
+            if key in data:
+                values[key] = _pct(data[key])
+
+        if values:
+            self._hw_chart.push(values)
 
         info_lines = []
         if "Model" in data:

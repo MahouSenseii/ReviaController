@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -28,6 +27,7 @@ from PyQt6.QtWidgets import (
 
 from core.config import Config
 from core.events import EventBus
+from ui.charts import LiveChart
 from ui.widgets import Pill, SectionLabel, StatusDot
 
 from .base_panel import BasePanel
@@ -183,8 +183,11 @@ class SidebarPanel(BasePanel):
     # Emotion display
     # ══════════════════════════════════════════════════════════
 
+    # Colours for the top-5 emotion chart series
+    _EMOTION_COLOURS = ["#f9c74f", "#f4845f", "#43aa8b", "#577590", "#90be6d"]
+
     def _build_emotion_display(self) -> QWidget:
-        """Build a compact emotion state widget."""
+        """Build the emotion chart widget."""
         w = QWidget()
         w.setObjectName("EmotionDisplay")
         lay = QVBoxLayout(w)
@@ -193,7 +196,7 @@ class SidebarPanel(BasePanel):
 
         lay.addWidget(SectionLabel("Emotional State"))
 
-        # Dominant emotion label
+        # Dominant emotion label (kept — shows the current top emotion)
         self._emotion_label = QLabel("Neutral")
         self._emotion_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._emotion_label.setStyleSheet(
@@ -209,44 +212,31 @@ class SidebarPanel(BasePanel):
         )
         lay.addWidget(self._mood_label)
 
-        # Top emotion bars (up to 3)
-        self._emotion_bars: list[tuple[QLabel, QProgressBar]] = []
-        for _ in range(3):
-            row = QWidget()
-            rh = QHBoxLayout(row)
-            rh.setContentsMargins(0, 0, 0, 0)
-            rh.setSpacing(6)
+        # Rolling line chart
+        self._emotion_chart = LiveChart(
+            max_points=40,
+            y_min=0.0,
+            y_max=100.0,
+            y_label="%",
+            height=160,
+            show_legend=True,
+        )
+        lay.addWidget(self._emotion_chart)
 
-            name_lbl = QLabel("-")
-            name_lbl.setFixedWidth(80)
-            name_lbl.setStyleSheet("font-size:11px; color:#c7d3e6;")
-            rh.addWidget(name_lbl)
-
-            bar = QProgressBar()
-            bar.setRange(0, 100)
-            bar.setValue(0)
-            bar.setTextVisible(False)
-            bar.setFixedHeight(8)
-            bar.setStyleSheet(
-                "QProgressBar { background:#0a0f18; border:1px solid #2a3b55; border-radius:4px; }"
-                "QProgressBar::chunk { background:#f9c74f; border-radius:3px; }"
-            )
-            rh.addWidget(bar, 1)
-
-            self._emotion_bars.append((name_lbl, bar))
-            lay.addWidget(row)
+        # Pre-register placeholder series; real names are set dynamically
+        self._emotion_series_names: list[str] = []
 
         return w
 
     def _on_emotion_changed(self, data: dict) -> None:
-        """Update the emotion display from emotion_state_changed event."""
+        """Push emotion data into the chart."""
         dominant = data.get("dominant", "neutral")
         intensity = data.get("dominant_intensity", 0.0)
         colour = data.get("colour", "#f9c74f")
         mood = data.get("mood", "neutral")
         top = data.get("top_emotions", [])
 
-        # Dominant emotion
+        # Dominant label
         if intensity < 0.05:
             self._emotion_label.setText("Neutral")
             self._emotion_label.setStyleSheet(
@@ -259,26 +249,30 @@ class SidebarPanel(BasePanel):
                 f"font-weight:700; font-size:14px; color:{colour}; padding:2px 0;"
             )
 
-        # Mood
         self._mood_label.setText(f"Mood: {mood}")
 
-        # Top emotion bars
-        for i, (name_lbl, bar) in enumerate(self._emotion_bars):
-            if i < len(top):
-                entry = top[i]
-                ename = entry.get("name", "-")
-                eintensity = entry.get("intensity", 0.0)
-                name_lbl.setText(ename)
-                bar.setValue(int(eintensity * 100))
+        # Ensure chart has a series for each of the current top emotions
+        for i, entry in enumerate(top[:5]):
+            name = entry.get("name", "?")
+            if name not in self._emotion_series_names:
+                c = self._EMOTION_COLOURS[
+                    len(self._emotion_series_names) % len(self._EMOTION_COLOURS)
+                ]
+                self._emotion_chart.add_series(name, c, width=2.0)
+                self._emotion_series_names.append(name)
 
-                # Colour the bar chunk based on intensity
-                bar.setStyleSheet(
-                    "QProgressBar { background:#0a0f18; border:1px solid #2a3b55; border-radius:4px; }"
-                    f"QProgressBar::chunk {{ background:{colour}; border-radius:3px; }}"
-                )
-            else:
-                name_lbl.setText("-")
-                bar.setValue(0)
+        # Push current intensities (0-100 %)
+        values: dict[str, float] = {}
+        for entry in top[:5]:
+            name = entry.get("name", "?")
+            values[name] = round(entry.get("intensity", 0.0) * 100, 1)
+
+        # Emotions not in this tick get 0
+        for sname in self._emotion_series_names:
+            if sname not in values:
+                values[sname] = 0.0
+
+        self._emotion_chart.push(values)
 
     # ══════════════════════════════════════════════════════════
     # Profile helpers
