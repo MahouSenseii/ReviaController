@@ -1,18 +1,19 @@
 """
 Center panel — runtime bar, assistant status, chat, inference.
 
-The Activity section is a live chat widget: scrollable message history
-with user/assistant messages, a text input, and a send button.
-Messages flow through the EventBus so the ConversationManager handles
-inference and the chat displays results.
+The top bar shows live stats (Model, VRAM, RAM, GPU, CPU) with a
+glowing Health indicator.  The assistant status section has individual
+items with animated glow dots that light up to show what the assistant
+is currently doing.
 """
 
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtGui import QColor, QTextCursor
 from PyQt6.QtWidgets import (
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,9 +25,58 @@ from PyQt6.QtWidgets import (
 
 from core.config import Config
 from core.events import EventBus
-from ui.widgets import GhostPanel, make_panel, panel_inner
+from ui.widgets import GhostPanel, StatusDot, make_panel, panel_inner
 
 from .base_panel import BasePanel
+
+
+# ── Health glow colours ───────────────────────────────────────
+_HEALTH = {
+    "active":  ("#33d17a", "Active"),
+    "warning": ("#f9c74f", "Issues"),
+    "error":   ("#ef476f", "Offline"),
+}
+
+
+class _GlowLabel(QLabel):
+    """A label with a coloured drop-shadow glow behind the text."""
+
+    def __init__(self, text: str, colour: str = "#33d17a"):
+        super().__init__(text)
+        self._glow = QGraphicsDropShadowEffect(self)
+        self._glow.setBlurRadius(24)
+        self._glow.setOffset(0, 0)
+        self.setGraphicsEffect(self._glow)
+        self.set_colour(colour)
+
+    def set_colour(self, colour: str) -> None:
+        self._glow.setColor(QColor(colour))
+        self.setStyleSheet(
+            f"color:{colour}; font-weight:800; font-size:14px; background:transparent;"
+        )
+
+
+class _StatusItem(QWidget):
+    """A single status row: glowing dot + label."""
+
+    def __init__(self, label: str, initial_status: str = "off"):
+        super().__init__()
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 2, 0, 2)
+        h.setSpacing(8)
+
+        self._dot = StatusDot(initial_status, size=10)
+        h.addWidget(self._dot, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._label = QLabel(label)
+        self._label.setStyleSheet("color:#c7d3e6; font-size:13px;")
+        h.addWidget(self._label, 1)
+
+    def set_active(self, active: bool) -> None:
+        self._dot.set_status("on" if active else "off")
+
+    def set_warn(self) -> None:
+        self._dot.set_status("warn")
 
 
 class CenterPanel(BasePanel):
@@ -44,7 +94,7 @@ class CenterPanel(BasePanel):
         status_panel = self._make_status_section()
         lay.addWidget(status_panel, 0)
 
-        # ── Chat (replaces old Activity log) ──────────────────
+        # ── Chat ──────────────────────────────────────────────
         chat_panel = self._make_chat_section()
         lay.addWidget(chat_panel, 1)
 
@@ -59,22 +109,100 @@ class CenterPanel(BasePanel):
         self.bus.subscribe("activity_log", self._on_activity_log)
         self.bus.subscribe("inference_metrics", self._on_inference_metrics)
         self.bus.subscribe("model_changed", self._on_model_changed)
+        self.bus.subscribe("plugin_activated", self._on_plugin_activated)
+        self.bus.subscribe("plugin_deactivated", self._on_plugin_deactivated)
+        self.bus.subscribe("user_message", self._on_user_message_status)
 
-    # ── Section builders ──────────────────────────────────────
+    # ══════════════════════════════════════════════════════════
+    # Top bar
+    # ══════════════════════════════════════════════════════════
 
     def _make_topbar(self) -> QFrame:
         bar = make_panel()
-        bar.setFixedHeight(60)
+        bar.setFixedHeight(56)
         inner = panel_inner(bar)
-        inner.layout().setContentsMargins(12, 8, 12, 8)
+        il = inner.layout()
+        il.setContentsMargins(12, 6, 12, 6)
 
-        self._topbar_label = QLabel(
-            "Runtime: Active   |   Model: -   |   VRAM: -   "
-            "|   RAM: -   |   GPU: -   |   CPU: -   |   Health: -"
-        )
-        self._topbar_label.setObjectName("TopBarText")
-        inner.layout().addWidget(self._topbar_label)
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+
+        # Individual stat labels — each one updates independently
+        self._stat_model = self._make_stat("Model", "-")
+        self._stat_vram  = self._make_stat("VRAM", "-")
+        self._stat_ram   = self._make_stat("RAM", "-")
+        self._stat_gpu   = self._make_stat("GPU", "-")
+        self._stat_cpu   = self._make_stat("CPU", "-")
+
+        for w in (self._stat_model, self._stat_vram, self._stat_ram,
+                  self._stat_gpu, self._stat_cpu):
+            h.addWidget(w, 1)
+            if w is not self._stat_cpu:
+                sep = QLabel("|")
+                sep.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                sep.setStyleSheet("color:#263246; font-size:16px; padding:0 4px;")
+                h.addWidget(sep, 0)
+
+        # Health indicator — glowing word
+        sep = QLabel("|")
+        sep.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sep.setStyleSheet("color:#263246; font-size:16px; padding:0 4px;")
+        h.addWidget(sep, 0)
+
+        health_w = QWidget()
+        hw = QHBoxLayout(health_w)
+        hw.setContentsMargins(0, 0, 0, 0)
+        hw.setSpacing(6)
+        hlbl = QLabel("Health:")
+        hlbl.setStyleSheet("color:#8fa6c3; font-size:12px; font-weight:600;")
+        hw.addWidget(hlbl, 0)
+
+        self._health_glow = _GlowLabel("Offline", "#ef476f")
+        hw.addWidget(self._health_glow, 0)
+        hw.addStretch(1)
+
+        h.addWidget(health_w, 1)
+
+        il.addWidget(row)
         return bar
+
+    @staticmethod
+    def _make_stat(key: str, value: str) -> QWidget:
+        """Create a small key: value stat widget."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(4, 0, 4, 0)
+        h.setSpacing(4)
+
+        k = QLabel(f"{key}:")
+        k.setStyleSheet("color:#8fa6c3; font-size:12px; font-weight:600;")
+        h.addWidget(k, 0)
+
+        v = QLabel(value)
+        v.setObjectName(f"stat_{key}")
+        v.setStyleSheet("color:#d8e1ee; font-size:12px;")
+        h.addWidget(v, 0)
+
+        h.addStretch(1)
+        return w
+
+    def _update_stat(self, key: str, value: str) -> None:
+        """Update a single stat value in the top bar."""
+        lbl = self._topbar.findChild(QLabel, f"stat_{key}")
+        if lbl:
+            lbl.setText(value)
+
+    def _set_health(self, level: str) -> None:
+        """Set health glow: 'active', 'warning', or 'error'."""
+        colour, text = _HEALTH.get(level, _HEALTH["error"])
+        self._health_glow.setText(text)
+        self._health_glow.set_colour(colour)
+
+    # ══════════════════════════════════════════════════════════
+    # Assistant status with glow dots
+    # ══════════════════════════════════════════════════════════
 
     def _make_status_section(self) -> QFrame:
         p = make_panel("Assistant Status", title_object="StatusPanelTitle")
@@ -84,21 +212,28 @@ class CenterPanel(BasePanel):
 
         inner = panel_inner(p)
         sl = inner.layout()
-        sl.setContentsMargins(12, 12, 12, 12)
-        sl.setSpacing(6)
+        sl.setContentsMargins(12, 10, 12, 10)
+        sl.setSpacing(4)
 
-        self._status_label = QLabel(
-            "• Listening...\n"
-            "• Processing Command...\n"
-            "• Vision: Idle\n"
-            "• Generating Response..."
-        )
-        self._status_label.setObjectName("MonoInfo")
-        sl.addWidget(self._status_label)
+        self._st_listening   = _StatusItem("Listening...", "off")
+        self._st_processing  = _StatusItem("Processing Command...", "off")
+        self._st_generating  = _StatusItem("Generating Response...", "off")
+        self._st_vision      = _StatusItem("Vision: Idle", "off")
+
+        for item in (self._st_listening, self._st_processing,
+                     self._st_generating, self._st_vision):
+            sl.addWidget(item)
+
+        # Start in listening state
+        self._st_listening.set_active(True)
+
         return p
 
+    # ══════════════════════════════════════════════════════════
+    # Chat section
+    # ══════════════════════════════════════════════════════════
+
     def _make_chat_section(self) -> QFrame:
-        """Build the chat panel with message history and input."""
         p = make_panel("Chat", title_object="ActivityPanelTitle")
         title = p.findChild(QLabel)
         title.setProperty("class", "AccentTitle")
@@ -109,7 +244,6 @@ class CenterPanel(BasePanel):
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(0)
 
-        # Message history
         self._chat_display = QTextEdit()
         self._chat_display.setReadOnly(True)
         self._chat_display.setObjectName("ChatDisplay")
@@ -139,7 +273,6 @@ class CenterPanel(BasePanel):
         )
         cl.addWidget(self._chat_display)
 
-        # Input row
         input_row = QWidget()
         input_row.setObjectName("ChatInputRow")
         input_row.setStyleSheet(
@@ -200,11 +333,12 @@ class CenterPanel(BasePanel):
         ih.addWidget(self._send_btn)
 
         cl.addWidget(input_row)
-
-        # Track if we're waiting for a response
         self._waiting = False
-
         return p
+
+    # ══════════════════════════════════════════════════════════
+    # Inference section
+    # ══════════════════════════════════════════════════════════
 
     def _make_inference_section(self) -> QFrame:
         p = make_panel("Inference", title_object="ActivityPanelTitle")
@@ -225,7 +359,6 @@ class CenterPanel(BasePanel):
         il.setContentsMargins(12, 12, 12, 12)
         il.setSpacing(12)
 
-        # Left column — model identity + live metrics
         left = QVBoxLayout()
         left.setSpacing(4)
 
@@ -261,72 +394,57 @@ class CenterPanel(BasePanel):
     # ══════════════════════════════════════════════════════════
 
     def _on_send(self) -> None:
-        """Send the user's message via the EventBus."""
         text = self._chat_input.text().strip()
         if not text or self._waiting:
             return
 
-        # Show user message in chat
         self._append_message("You", text, "#7fb3ff")
-
-        # Clear input
         self._chat_input.clear()
-
-        # Disable input while waiting
         self._waiting = True
         self._send_btn.setEnabled(False)
         self._chat_input.setEnabled(False)
 
-        # Publish for ConversationManager to pick up
         self.bus.publish("user_message", {"text": text})
-
-        # Show typing indicator
         self._append_system("Thinking...")
 
     def _on_assistant_response(self, data: dict) -> None:
-        """Display the assistant's response in the chat."""
         text = data.get("text", "")
         if not text:
             return
 
-        # Remove the "Thinking..." indicator
         self._remove_last_system()
-
         model = data.get("model", "AI")
         self._append_message(model, text, "#33d17a")
 
-        # Re-enable input
         self._waiting = False
         self._send_btn.setEnabled(True)
         self._chat_input.setEnabled(True)
         self._chat_input.setFocus()
 
+        # Back to listening
+        self._set_status_state("listening")
+
     def _on_activity_log(self, data: dict) -> None:
-        """Show system/error messages in the chat."""
         text = data.get("text", "")
         if not text:
             return
 
-        # Show system and error messages
         if text.startswith("[System]") or text.startswith("[Error]"):
             self._remove_last_system()
             self._append_system(text)
-
-            # Re-enable input on error
             if text.startswith("[Error]") or "No AI backend" in text:
                 self._waiting = False
                 self._send_btn.setEnabled(True)
                 self._chat_input.setEnabled(True)
+                self._set_status_state("listening")
 
     def _append_message(self, sender: str, text: str, colour: str) -> None:
-        """Append a styled chat message to the display."""
         escaped = (
             text.replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
             .replace("\n", "<br>")
         )
-
         html = (
             f'<div style="margin-bottom:12px;">'
             f'<span style="color:{colour}; font-weight:700; font-size:12px;">'
@@ -335,7 +453,6 @@ class CenterPanel(BasePanel):
             f'{escaped}</span>'
             f'</div>'
         )
-
         cursor = self._chat_display.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self._chat_display.setTextCursor(cursor)
@@ -343,16 +460,13 @@ class CenterPanel(BasePanel):
         self._scroll_to_bottom()
 
     def _append_system(self, text: str) -> None:
-        """Append a system/status message in muted style."""
         escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
         html = (
             f'<div id="sys_msg" style="margin-bottom:8px;">'
             f'<span style="color:#5a6a7e; font-style:italic; font-size:12px;">'
             f'{escaped}</span>'
             f'</div>'
         )
-
         cursor = self._chat_display.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self._chat_display.setTextCursor(cursor)
@@ -360,38 +474,76 @@ class CenterPanel(BasePanel):
         self._scroll_to_bottom()
 
     def _remove_last_system(self) -> None:
-        """Remove the last system message (e.g. 'Thinking...')."""
         content = self._chat_display.toHtml()
         marker = '<div id="sys_msg"'
         idx = content.rfind(marker)
         if idx == -1:
             return
-
         end_tag = "</div>"
         end_idx = content.find(end_tag, idx)
         if end_idx == -1:
             return
-
         new_content = content[:idx] + content[end_idx + len(end_tag):]
         self._chat_display.setHtml(new_content)
         self._scroll_to_bottom()
 
     def _scroll_to_bottom(self) -> None:
-        """Scroll chat display to the bottom."""
         sb = self._chat_display.verticalScrollBar()
         QTimer.singleShot(10, lambda: sb.setValue(sb.maximum()))
 
     # ══════════════════════════════════════════════════════════
-    # Other event handlers
+    # Status glow logic
     # ══════════════════════════════════════════════════════════
 
-    def _on_runtime_stats(self, data: dict) -> None:
-        parts = [f"{k}: {v}" for k, v in data.items()]
-        self._topbar_label.setText("   |   ".join(parts))
+    def _set_status_state(self, state: str) -> None:
+        """Light up the correct status dots.
+
+        States: 'listening', 'processing', 'generating', 'error'
+        """
+        self._st_listening.set_active(state == "listening")
+        self._st_processing.set_active(state == "processing")
+        self._st_generating.set_active(state == "generating")
+
+    # ══════════════════════════════════════════════════════════
+    # Event handlers
+    # ══════════════════════════════════════════════════════════
+
+    def _on_user_message_status(self, data: dict) -> None:
+        self._set_status_state("processing")
 
     def _on_assistant_status(self, data: dict) -> None:
         lines = data.get("lines", [])
-        self._status_label.setText("\n".join(f"• {l}" for l in lines))
+        joined = " ".join(lines).lower()
+        if "generating" in joined:
+            self._set_status_state("generating")
+        elif "processing" in joined:
+            self._set_status_state("processing")
+        elif "listening" in joined:
+            self._set_status_state("listening")
+        elif "error" in joined:
+            self._set_status_state("error")
+
+    def _on_runtime_stats(self, data: dict) -> None:
+        for key in ("Model", "VRAM", "RAM", "GPU", "CPU"):
+            if key in data:
+                self._update_stat(key, str(data[key]))
+        if "Health" in data:
+            h = str(data["Health"]).lower()
+            if h in ("active", "ok", "healthy", "good"):
+                self._set_health("active")
+            elif h in ("warning", "warn", "degraded"):
+                self._set_health("warning")
+            else:
+                self._set_health("error")
+
+    def _on_plugin_activated(self, data: dict) -> None:
+        name = data.get("name", "?")
+        self._set_health("active")
+        self._update_stat("Model", name)
+
+    def _on_plugin_deactivated(self, data: dict) -> None:
+        self._set_health("error")
+        self._update_stat("Model", "-")
 
     def _on_model_changed(self, data: dict) -> None:
         name = data.get("model") or "-"
@@ -399,12 +551,9 @@ class CenterPanel(BasePanel):
         mode = data.get("mode", "")
 
         compute = reg.get("compute", "")
-        params = reg.get("parameters", "")
-        if compute:
-            display = f"{name} ({compute})"
-        else:
-            display = name
+        display = f"{name} ({compute})" if compute else name
         self._llm_name_label.setText(f"LLM: {display}")
+        self._update_stat("Model", name)
 
         size = reg.get("size_label", "-")
         quant = reg.get("quant", "") or "-"
@@ -414,6 +563,7 @@ class CenterPanel(BasePanel):
             detail = f"Provider: {provider}   |   Model: {model_id}"
         else:
             parts = [f"Size: {size}"]
+            params = reg.get("parameters", "")
             if params:
                 parts.append(f"Params: {params}")
             parts.append(f"Quant: {quant}")
