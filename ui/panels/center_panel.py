@@ -102,6 +102,10 @@ class CenterPanel(BasePanel):
         inference_panel = self._make_inference_section()
         lay.addWidget(inference_panel, 0)
 
+        # ── Pipeline timing ─────────────────────────────────────
+        timing_panel = self._make_timing_section()
+        lay.addWidget(timing_panel, 0)
+
         # ── Subscribe to live data ────────────────────────────
         self.bus.subscribe("runtime_stats", self._on_runtime_stats)
         self.bus.subscribe("assistant_status", self._on_assistant_status)
@@ -112,6 +116,10 @@ class CenterPanel(BasePanel):
         self.bus.subscribe("plugin_activated", self._on_plugin_activated)
         self.bus.subscribe("plugin_deactivated", self._on_plugin_deactivated)
         self.bus.subscribe("user_message", self._on_user_message_status)
+        self.bus.subscribe("pipeline_timing", self._on_pipeline_timing)
+        self.bus.subscribe("decision_made", self._on_decision_made)
+        self.bus.subscribe("metacognition_update", self._on_metacognition)
+        self.bus.subscribe("self_dev_update", self._on_self_dev)
 
     # ══════════════════════════════════════════════════════════
     # Top bar
@@ -578,3 +586,164 @@ class CenterPanel(BasePanel):
             f"Context: {data.get('context', '-')}",
         ]
         self._inference_label.setText("\n".join(lines))
+
+    # ══════════════════════════════════════════════════════════
+    # Pipeline Timing section
+    # ══════════════════════════════════════════════════════════
+
+    def _make_timing_section(self) -> QFrame:
+        p = make_panel("Pipeline Timing", title_object="TimingPanelTitle")
+        title = p.findChild(QLabel)
+        title.setProperty("class", "AccentTitle")
+        title.setStyleSheet("color: #8fc9ff;")
+
+        inner = panel_inner(p)
+        old = inner.layout()
+        if old is not None:
+            while old.count():
+                item = old.takeAt(0)
+                w = item.widget()
+                if w:
+                    w.setParent(None)
+
+        il = QHBoxLayout(inner)
+        il.setContentsMargins(12, 8, 12, 8)
+        il.setSpacing(16)
+
+        # ── Timing column ──────────────────────────────────────
+        timing_col = QVBoxLayout()
+        timing_col.setSpacing(2)
+
+        timing_title = QLabel("Stage Latency")
+        timing_title.setStyleSheet(
+            "color:#8fa6c3; font-size:11px; font-weight:700;"
+        )
+        timing_col.addWidget(timing_title)
+
+        self._timing_label = QLabel(
+            "Stimulus:  -\n"
+            "Emotion:   -\n"
+            "Decision:  -\n"
+            "Inference: -\n"
+            "Total:     -"
+        )
+        self._timing_label.setObjectName("MonoInfo")
+        self._timing_label.setStyleSheet(
+            "color:#d8e1ee; font-size:12px; font-family:'Consolas','Courier New',monospace;"
+        )
+        timing_col.addWidget(self._timing_label)
+
+        timing_w = QWidget()
+        timing_w.setLayout(timing_col)
+        timing_w.setFixedWidth(180)
+        il.addWidget(timing_w)
+
+        # ── Decision column ────────────────────────────────────
+        decision_col = QVBoxLayout()
+        decision_col.setSpacing(2)
+
+        decision_title = QLabel("Decision Strategy")
+        decision_title.setStyleSheet(
+            "color:#8fa6c3; font-size:11px; font-weight:700;"
+        )
+        decision_col.addWidget(decision_title)
+
+        self._decision_label = QLabel(
+            "Empathy: -  Warmth: -\n"
+            "Verbose: -  Assert: -\n"
+            "Curious: -  Caution: -"
+        )
+        self._decision_label.setObjectName("MonoInfo")
+        self._decision_label.setStyleSheet(
+            "color:#d8e1ee; font-size:12px; font-family:'Consolas','Courier New',monospace;"
+        )
+        decision_col.addWidget(self._decision_label)
+
+        decision_w = QWidget()
+        decision_w.setLayout(decision_col)
+        decision_w.setFixedWidth(220)
+        il.addWidget(decision_w)
+
+        # ── Metacognition column ───────────────────────────────
+        meta_col = QVBoxLayout()
+        meta_col.setSpacing(2)
+
+        meta_title = QLabel("Self-Awareness")
+        meta_title.setStyleSheet(
+            "color:#8fa6c3; font-size:11px; font-weight:700;"
+        )
+        meta_col.addWidget(meta_title)
+
+        self._meta_label = QLabel(
+            "Confidence: -\n"
+            "Accuracy:   -\n"
+            "Learning:   -"
+        )
+        self._meta_label.setObjectName("MonoInfo")
+        self._meta_label.setStyleSheet(
+            "color:#d8e1ee; font-size:12px; font-family:'Consolas','Courier New',monospace;"
+        )
+        meta_col.addWidget(self._meta_label)
+
+        meta_w = QWidget()
+        meta_w.setLayout(meta_col)
+        il.addWidget(meta_w, 1)
+
+        return p
+
+    # ── Pipeline timing handler ────────────────────────────────
+
+    def _on_pipeline_timing(self, data: dict) -> None:
+        lines = [
+            f"Stimulus:  {data.get('stimulus', '-')}",
+            f"Emotion:   {data.get('emotion', '-')}",
+            f"Decision:  {data.get('decision', '-')}",
+            f"Inference: {data.get('inference', '-')}",
+            f"Total:     {data.get('total', '-')}",
+        ]
+        self._timing_label.setText("\n".join(lines))
+
+    def _on_decision_made(self, data: dict) -> None:
+        def _bar(val: float) -> str:
+            """Render a value as a small text bar."""
+            filled = int(val * 5)
+            return "|" * filled + "." * (5 - filled)
+
+        lines = [
+            f"Empathy: {_bar(data.get('empathy', 0))}  "
+            f"Warmth: {_bar(data.get('warmth', 0))}",
+            f"Verbose: {_bar(data.get('verbosity', 0))}  "
+            f"Assert: {_bar(data.get('assertiveness', 0))}",
+            f"Curious: {_bar(data.get('curiosity', 0))}  "
+            f"Caution: {_bar(data.get('caution', 0))}",
+        ]
+
+        flags = data.get("flags", {})
+        active_flags = [k for k, v in flags.items() if v]
+        if active_flags:
+            lines.append(f"Flags: {', '.join(active_flags)}")
+
+        self._decision_label.setText("\n".join(lines))
+
+    def _on_metacognition(self, data: dict) -> None:
+        conf = data.get("confidence", 0)
+        acc = data.get("last_accuracy", 0)
+        lines = [
+            f"Confidence: {conf:.0%}",
+            f"Accuracy:   {acc:.0%}",
+            f"Predictions: {data.get('prediction_count', 0)}",
+        ]
+        self._meta_label.setText("\n".join(lines))
+
+    def _on_self_dev(self, data: dict) -> None:
+        # Update the metacognition label with growth info
+        lr = data.get("learning_rate", 0)
+        bypass = data.get("bypass_strength", 0)
+        interactions = data.get("total_interactions", 0)
+        pos_ratio = data.get("positive_ratio", 0.5)
+        lines = [
+            f"Confidence: {data.get('avg_accuracy', 0):.0%}",
+            f"LR: {lr:.4f}  Bypass: {bypass:.2f}",
+            f"Interactions: {interactions}  +/-: {pos_ratio:.0%}",
+        ]
+        self._meta_label.setText("\n".join(lines))

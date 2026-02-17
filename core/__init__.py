@@ -8,3 +8,7 @@ from .emotion_nn import EmotionNeuralNetwork
 from .emotion_engine import EmotionEngine, EmotionEngineConfig, Stimulus
 from .conversation import ConversationManager
 from .stimulus import StimulusAnalyser
+from .decision import DecisionEngine, ResponseStrategy
+from .metacognition import MetacognitionEngine
+from .self_dev import SelfDevelopmentEngine
+from .timing import PipelineTimer
