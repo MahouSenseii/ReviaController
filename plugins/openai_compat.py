@@ -37,6 +37,19 @@ class OpenAICompatPlugin(AIPluginBase):
     _plugin_name: str = "OpenAI-Compatible"
     _plugin_version: str = "1.0.0"
 
+    @staticmethod
+    def _normalize_base_url(url: str) -> str:
+        """Normalize user input to a host root expected by OpenAI routes.
+
+        Users often paste endpoints like ``http://localhost:8080/v1``.
+        The plugin itself appends ``/v1/...`` paths, so keeping that suffix
+        would produce broken URLs (``.../v1/v1/models``).
+        """
+        cleaned = (url or "").rstrip("/")
+        if cleaned.endswith("/v1"):
+            cleaned = cleaned[:-3]
+        return cleaned
+
     def __init__(self) -> None:
         self._base_url: str = self._default_base_url
         self._api_key: str = ""
@@ -66,10 +79,8 @@ class OpenAICompatPlugin(AIPluginBase):
     # ── Lifecycle ─────────────────────────────────────────────
 
     def connect(self, config: dict[str, Any]) -> None:
-        self._base_url = (
-            config.get("base_url", "").rstrip("/")
-            or self._default_base_url
-        )
+        raw_base_url = config.get("base_url", "")
+        self._base_url = self._normalize_base_url(raw_base_url) or self._default_base_url
         self._api_key = config.get("api_key", "")
         self._timeout = int(config.get("timeout", 120))
 
