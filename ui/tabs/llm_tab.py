@@ -837,6 +837,8 @@ class LLMTab(BaseTab):
             if models and 0 <= lidx < len(models):
                 entry = models[lidx]
                 cfg["base_url"] = entry.get("address", "")
+                cfg["model_name"] = entry.get("name", "")
+                cfg["model_path"] = entry.get("path", "")
 
         try:
             plugin = self._pm.activate(plugin_name, cfg)
@@ -849,11 +851,20 @@ class LLMTab(BaseTab):
             self._populate_model_selector(plugin)
 
             # Select the correct model on the now-connected plugin
+            desired_model_id = None
             if is_online and cfg.get("model_id"):
+                desired_model_id = cfg["model_id"]
+            elif not is_online and cfg.get("model_name"):
+                # For local: try to match by name against server models
+                desired_model_id = self._match_local_model(
+                    plugin, cfg["model_name"], cfg.get("model_path", ""),
+                )
+
+            if desired_model_id:
                 try:
-                    plugin.select_model(cfg["model_id"])
+                    plugin.select_model(desired_model_id)
                     # Sync the combo to match
-                    idx = self._model_select_combo.findData(cfg["model_id"])
+                    idx = self._model_select_combo.findData(desired_model_id)
                     if idx >= 0:
                         self._model_select_combo.blockSignals(True)
                         self._model_select_combo.setCurrentIndex(idx)
@@ -1011,3 +1022,45 @@ class LLMTab(BaseTab):
             pass
 
         self._populate_model_selector(plugin)
+
+    @staticmethod
+    def _match_local_model(plugin, model_name: str, model_path: str) -> str | None:
+        """
+        Try to match a user's local library entry against the server's
+        loaded models.  Returns the best-matching model ID, or None.
+
+        Matching strategy (in priority order):
+        1. Exact model ID match on name
+        2. Model ID contains the library name (e.g. Ollama "llama3:latest"
+           matches library name "llama3")
+        3. Model ID contains the filename stem from the model path
+           (e.g. server model "my-model.gguf" matches path
+           "/models/my-model.gguf")
+        """
+        from pathlib import Path as _Path
+
+        server_models = plugin.list_models()
+        if not server_models:
+            return None
+
+        name_lower = model_name.lower()
+        stem_lower = _Path(model_path).stem.lower() if model_path else ""
+
+        # Pass 1: exact ID match
+        for m in server_models:
+            if m.id.lower() == name_lower or m.name.lower() == name_lower:
+                return m.id
+
+        # Pass 2: server model contains the library name
+        if name_lower:
+            for m in server_models:
+                if name_lower in m.id.lower() or name_lower in m.name.lower():
+                    return m.id
+
+        # Pass 3: match on filename stem
+        if stem_lower:
+            for m in server_models:
+                if stem_lower in m.id.lower() or stem_lower in m.name.lower():
+                    return m.id
+
+        return None
