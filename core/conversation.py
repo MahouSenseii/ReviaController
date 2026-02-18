@@ -20,12 +20,16 @@ Responsibilities
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .config import Config
 from .emotion_engine import EmotionEngine
 from .events import EventBus
 from .plugin_manager import PluginManager
+
+_PROFILE_PATH = Path("profile.json")
 
 if TYPE_CHECKING:
     from .decision import DecisionEngine
@@ -210,15 +214,49 @@ class ConversationManager:
         # System prompt
         system_parts: list[str] = []
 
-        # Base system prompt from behavior settings
-        base_prompt = self.config.get("behavior.system_prompt", "")
+        # Load AI profile for identity context
+        profile = self._load_profile()
+
+        # Base system prompt from profile (preferred) or config fallback
+        base_prompt = (
+            profile.get("system_prompt")
+            or self.config.get("behavior.system_prompt", "")
+        )
         if base_prompt:
             system_parts.append(base_prompt)
 
+        # Character identity from profile
+        char_name = profile.get("character_name", "")
+        persona_desc = profile.get("persona", "")
+        traits = profile.get("personality_traits", "")
+        greeting = profile.get("greeting", "")
+        fallback = profile.get("fallback_message", "")
+        voice_tone = profile.get("voice_tone", "")
+
+        if char_name or persona_desc:
+            identity_parts = []
+            if char_name:
+                identity_parts.append(f"Your name is {char_name}.")
+            if persona_desc:
+                identity_parts.append(f"Persona: {persona_desc}")
+            if traits:
+                identity_parts.append(f"Personality traits: {traits}.")
+            if voice_tone:
+                identity_parts.append(f"Voice tone: {voice_tone}.")
+            if greeting:
+                identity_parts.append(
+                    f"When greeting users for the first time, say: {greeting}"
+                )
+            if fallback:
+                identity_parts.append(
+                    f"When you don't understand something, respond with: {fallback}"
+                )
+            system_parts.append("[Character Identity]\n" + " ".join(identity_parts))
+
         # Personality / style hints
-        persona = self.config.get("behavior.persona", "Friendly")
-        verbosity = self.config.get("behavior.verbosity", "Medium")
-        style = self.config.get("behavior.response_style", "Conversational")
+        persona = profile.get("persona") or self.config.get("behavior.persona", "Friendly")
+        verbosity = profile.get("verbosity") or self.config.get("behavior.verbosity", "Medium")
+        style = profile.get("response_style") or self.config.get("behavior.response_style", "Conversational")
         system_parts.append(
             f"Personality: {persona}. "
             f"Verbosity: {verbosity}. "
@@ -259,6 +297,17 @@ class ConversationManager:
         # Conversation history
         messages.extend(self._history)
         return messages
+
+    @staticmethod
+    def _load_profile() -> Dict[str, Any]:
+        """Load the AI profile from profile.json, returning {} on failure."""
+        if not _PROFILE_PATH.exists():
+            return {}
+        try:
+            data = json.loads(_PROFILE_PATH.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError):
+            return {}
 
     def _trim_history(self) -> None:
         """Keep only the last N messages to avoid unbounded growth."""

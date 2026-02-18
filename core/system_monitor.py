@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from typing import Optional
 
 import psutil
@@ -84,6 +85,7 @@ class SystemMonitor(QObject):
         super().__init__(parent)
         self._bus = event_bus
         self._pm = plugin_manager
+        self._start_time = time.monotonic()
 
         self._timer = QTimer(self)
         self._timer.setInterval(interval_ms)
@@ -110,15 +112,35 @@ class SystemMonitor(QObject):
         plugin = self._pm.active_plugin
         if plugin is not None and plugin.is_connected():
             health = "active"
+            try:
+                model = plugin.active_model()
+                model_name = model.name if model else "connected"
+            except Exception:
+                model_name = "connected"
         elif plugin is not None:
             health = "warning"
+            model_name = "disconnected"
         else:
-            health = "error"
+            health = "standby"
+            model_name = "no provider"
+
+        # Uptime
+        elapsed = time.monotonic() - self._start_time
+        hours, remainder = divmod(int(elapsed), 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours > 0:
+            uptime = f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            uptime = f"{minutes}m {seconds}s"
+        else:
+            uptime = f"{seconds}s"
 
         data: dict[str, str] = {
             "CPU": cpu,
             "RAM": ram,
             "Health": health,
+            "Model": model_name,
+            "Uptime": uptime,
         }
         if gpu is not None:
             data["GPU"] = gpu

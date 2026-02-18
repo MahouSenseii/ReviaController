@@ -111,6 +111,29 @@ class LLMTab(BaseTab):
         self._conn_status_label.setStyleSheet("color:#8fa6c3; font-size:11px; padding:2px 0;")
         lay.addWidget(self._conn_status_label)
 
+        # ── Active model selector (populated after connect) ────
+        model_sel_row = QWidget()
+        msr = QHBoxLayout(model_sel_row)
+        msr.setContentsMargins(0, 0, 0, 0)
+        msr.setSpacing(8)
+
+        self._model_select_combo = QComboBox()
+        self._model_select_combo.setObjectName("SettingsCombo")
+        self._model_select_combo.setMinimumHeight(28)
+        self._model_select_combo.setEnabled(False)
+        self._model_select_combo.addItem("(connect to see models)")
+        self._model_select_combo.currentIndexChanged.connect(self._on_model_selected)
+        msr.addWidget(self._model_select_combo, 1)
+
+        self._refresh_models_btn = QPushButton("Refresh")
+        self._refresh_models_btn.setObjectName("ModeButton")
+        self._refresh_models_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._refresh_models_btn.setEnabled(False)
+        self._refresh_models_btn.clicked.connect(self._on_refresh_models)
+        msr.addWidget(self._refresh_models_btn)
+
+        lay.addWidget(self._row("Active Model", model_sel_row))
+
         # Separator
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -822,10 +845,19 @@ class LLMTab(BaseTab):
             self._connect_btn.setEnabled(False)
             self._disconnect_btn.setEnabled(True)
 
+            # Populate the model selector from the server's loaded models
+            self._populate_model_selector(plugin)
+
             # Select the correct model on the now-connected plugin
             if is_online and cfg.get("model_id"):
                 try:
                     plugin.select_model(cfg["model_id"])
+                    # Sync the combo to match
+                    idx = self._model_select_combo.findData(cfg["model_id"])
+                    if idx >= 0:
+                        self._model_select_combo.blockSignals(True)
+                        self._model_select_combo.setCurrentIndex(idx)
+                        self._model_select_combo.blockSignals(False)
                 except Exception:
                     pass
 
@@ -857,6 +889,8 @@ class LLMTab(BaseTab):
             self._conn_status_label.setStyleSheet(
                 "color:#ef476f; font-size:11px; padding:2px 0;"
             )
+            self._model_select_combo.setEnabled(False)
+            self._refresh_models_btn.setEnabled(False)
             self.bus.publish("log_entry", {
                 "category": "Filtered",
                 "text": f"Connection failed: {e}",
@@ -872,7 +906,108 @@ class LLMTab(BaseTab):
         )
         self._connect_btn.setEnabled(True)
         self._disconnect_btn.setEnabled(False)
+
+        # Clear model selector
+        self._model_select_combo.blockSignals(True)
+        self._model_select_combo.clear()
+        self._model_select_combo.addItem("(connect to see models)")
+        self._model_select_combo.setEnabled(False)
+        self._model_select_combo.blockSignals(False)
+        self._refresh_models_btn.setEnabled(False)
+
         self.bus.publish("log_entry", {
             "category": "Allowed",
             "text": "Disconnected from AI backend",
         })
+
+    # ══════════════════════════════════════════════════════════
+    # Model selector (server-side model discovery)
+    # ══════════════════════════════════════════════════════════
+
+    def _populate_model_selector(self, plugin) -> None:
+        """Populate the Active Model dropdown from the plugin's loaded models."""
+        self._model_select_combo.blockSignals(True)
+        self._model_select_combo.clear()
+
+        models = plugin.list_models()
+        if not models:
+            self._model_select_combo.addItem("(no models found on server)")
+            self._model_select_combo.setEnabled(False)
+        else:
+            for m in models:
+                # Show name in the label, store model id as data
+                label = m.name
+                if m.context_window and m.context_window > 0:
+                    label += f"  ({m.context_window // 1024}k ctx)"
+                meta = m.metadata or {}
+                if meta.get("parameter_size"):
+                    label += f"  [{meta['parameter_size']}]"
+                if meta.get("quantization"):
+                    label += f"  {meta['quantization']}"
+                self._model_select_combo.addItem(label, m.id)
+            self._model_select_combo.setEnabled(True)
+
+            # Select the currently active model
+            active = plugin.active_model()
+            if active:
+                idx = self._model_select_combo.findData(active.id)
+                if idx >= 0:
+                    self._model_select_combo.setCurrentIndex(idx)
+
+        self._model_select_combo.blockSignals(False)
+        self._refresh_models_btn.setEnabled(True)
+
+    def _on_model_selected(self, idx: int) -> None:
+        """User picked a different model from the dropdown."""
+        if idx < 0:
+            return
+        model_id = self._model_select_combo.currentData()
+        if not model_id:
+            return
+
+        plugin = self._pm.active_plugin
+        if plugin is None or not plugin.is_connected():
+            return
+
+        try:
+            plugin.select_model(model_id)
+            active = plugin.active_model()
+            model_name = active.name if active else model_id
+            self._conn_status_label.setText(
+                f"Connected: {plugin.name}  |  Model: {model_name}"
+            )
+            self._conn_status_label.setStyleSheet(
+                "color:#33d17a; font-size:11px; padding:2px 0;"
+            )
+
+            is_online = self.config.get("llm.mode", "local") == "online"
+            self.bus.publish("model_changed", {
+                "model": model_name,
+                "mode": "online" if is_online else "local",
+                "registry": active.metadata if active else {},
+            })
+
+            self.bus.publish("log_entry", {
+                "category": "Allowed",
+                "text": f"Switched model to: {model_name}",
+            })
+        except Exception as e:
+            self._conn_status_label.setText(f"Model switch failed: {e}")
+            self._conn_status_label.setStyleSheet(
+                "color:#ef476f; font-size:11px; padding:2px 0;"
+            )
+
+    def _on_refresh_models(self) -> None:
+        """Re-query the server for available models."""
+        plugin = self._pm.active_plugin
+        if plugin is None or not plugin.is_connected():
+            return
+
+        # Force a fresh fetch by clearing the cache
+        try:
+            plugin._models = []
+            plugin._models = plugin._fetch_models()
+        except Exception:
+            pass
+
+        self._populate_model_selector(plugin)
