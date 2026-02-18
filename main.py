@@ -23,6 +23,8 @@ from core import (
     MetacognitionEngine,
     SelfDevelopmentEngine,
     PipelineTimer,
+    SystemMonitor,
+    ModuleStatusTracker,
 )
 from core.stimulus import StimulusAnalyser
 from main_window import MainWindow
@@ -70,6 +72,14 @@ def main() -> None:
     tick_timer.setInterval(emotion_engine.cfg.tick_interval_ms)
     tick_timer.timeout.connect(emotion_engine.tick)
     tick_timer.start()
+
+    # System resource monitor — publishes runtime_stats every 3 s
+    sys_monitor = SystemMonitor(bus, pm)
+    sys_monitor.start()
+
+    # Module status tracker — keeps STT / TTS / Vision pills accurate
+    module_tracker = ModuleStatusTracker(bus, pm)
+    module_tracker.refresh_all()
 
     # Main window
     window = MainWindow(bus, config, pm, emotion_engine)
