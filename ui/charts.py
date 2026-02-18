@@ -71,7 +71,7 @@ class LiveChart(QWidget):
         self._chart.setBackgroundBrush(_BG)
         self._chart.setPlotAreaBackgroundBrush(_BG)
         self._chart.setPlotAreaBackgroundVisible(True)
-        self._chart.setMargins(QMargins(4, 4, 4, 4))
+        self._chart.setMargins(QMargins(8, 8, 8, 8))
 
         # Legend
         if show_legend:
@@ -79,7 +79,7 @@ class LiveChart(QWidget):
             legend.setVisible(True)
             legend.setAlignment(Qt.AlignmentFlag.AlignBottom)
             legend.setLabelColor(_LABEL)
-            legend.setFont(QFont("Segoe UI", 8))
+            legend.setFont(QFont("Segoe UI", 10))
             legend.setMarkerShape(legend.MarkerShape.MarkerShapeCircle)
         else:
             self._chart.legend().setVisible(False)
@@ -98,9 +98,9 @@ class LiveChart(QWidget):
         self._y_axis.setRange(y_min, y_max)
         self._y_axis.setTitleText(y_label)
         self._y_axis.setTitleBrush(_LABEL)
-        self._y_axis.setTitleFont(QFont("Segoe UI", 8))
+        self._y_axis.setTitleFont(QFont("Segoe UI", 10))
         self._y_axis.setLabelsColor(_LABEL)
-        self._y_axis.setLabelsFont(QFont("Segoe UI", 7))
+        self._y_axis.setLabelsFont(QFont("Segoe UI", 9))
         self._y_axis.setGridLineVisible(True)
         self._y_axis.setGridLineColor(_GRID)
         self._y_axis.setLinePenColor(_AXIS_LINE)

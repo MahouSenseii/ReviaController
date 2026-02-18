@@ -819,23 +819,37 @@ class LLMTab(BaseTab):
             plugin = self._pm.activate(plugin_name, cfg)
             self.config.set("llm.backend", plugin_name)
             self._conn_dot.set_status("on")
-            self._conn_status_label.setText(f"Connected: {plugin.name}")
-            self._conn_status_label.setStyleSheet(
-                "color:#33d17a; font-size:11px; padding:2px 0;"
-            )
             self._connect_btn.setEnabled(False)
             self._disconnect_btn.setEnabled(True)
 
-            # If online mode, select model by model_id
+            # Select the correct model on the now-connected plugin
             if is_online and cfg.get("model_id"):
                 try:
                     plugin.select_model(cfg["model_id"])
                 except Exception:
                     pass
 
+            # Report the active model
+            active = plugin.active_model()
+            model_name = active.name if active else "?"
+            self._conn_status_label.setText(
+                f"Connected: {plugin.name}  |  Model: {model_name}"
+            )
+            self._conn_status_label.setStyleSheet(
+                "color:#33d17a; font-size:11px; padding:2px 0;"
+            )
+
+            # Publish model info so the top bar and inference panel update
+            if active:
+                self.bus.publish("model_changed", {
+                    "model": active.name,
+                    "mode": "online" if is_online else "local",
+                    "registry": active.metadata,
+                })
+
             self.bus.publish("log_entry", {
                 "category": "Allowed",
-                "text": f"Connected to {plugin.name}",
+                "text": f"Connected to {plugin.name} — model: {model_name}",
             })
         except Exception as e:
             self._conn_dot.set_status("off")

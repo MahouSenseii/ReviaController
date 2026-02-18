@@ -35,7 +35,7 @@ class SettingsPanel(BasePanel):
     ):
         self._plugin_manager = plugin_manager
         super().__init__(event_bus, config)
-        self.setFixedWidth(490)
+        self.setFixedWidth(540)
 
     def _build(self) -> None:
         lay = self._inner_layout
@@ -52,7 +52,7 @@ class SettingsPanel(BasePanel):
         self._logs_tab = LogsTab(self.bus, self.config)
         self._system_tab = SystemTab(self.bus, self.config)
 
-        self._tabs.addTab(self._behavior_tab, "Behavior")
+        self._tabs.addTab(self._behavior_tab, "Profile")
         self._tabs.addTab(self._llm_tab, "LLM")
         self._tabs.addTab(self._voice_vision_tab, "Voice && Vision")
         self._tabs.addTab(self._filters_tab, "Filters")

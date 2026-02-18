@@ -73,16 +73,25 @@ class OpenAICompatPlugin(AIPluginBase):
         self._api_key = config.get("api_key", "")
         self._timeout = int(config.get("timeout", 120))
 
-        # Probe the server
+        # Probe the server — verify reachability first
+        self._verify_server()
+
+        # Fetch available models
         try:
             self._models = self._fetch_models()
             self._connected = True
             if self._models and self._model is None:
                 self._model = self._models[0]
         except Exception:
-            # Still mark connected so the UI can show the error state
             self._connected = False
             raise
+
+        if not self._models:
+            self._connected = False
+            raise ConnectionError(
+                f"Connected to {self._base_url} but no models were found. "
+                f"Make sure the server has at least one model loaded."
+            )
 
     def disconnect(self) -> None:
         self._connected = False
@@ -212,6 +221,18 @@ class OpenAICompatPlugin(AIPluginBase):
             resp.close()
 
     # ── HTTP helpers ──────────────────────────────────────────
+
+    def _verify_server(self) -> None:
+        """Quick check that the server is reachable."""
+        try:
+            req = urllib.request.Request(self._base_url, method="GET")
+            urllib.request.urlopen(req, timeout=5)
+        except urllib.error.HTTPError:
+            pass  # Server is reachable (returned an HTTP response)
+        except (urllib.error.URLError, OSError) as e:
+            raise ConnectionError(
+                f"Cannot reach server at {self._base_url}: {e}"
+            ) from e
 
     def _make_request(
         self, url: str, body: dict | None = None,
