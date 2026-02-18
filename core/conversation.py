@@ -86,10 +86,12 @@ class ConversationManager:
 
         plugin = self.pm.active_plugin
         if plugin is None or not plugin.is_connected():
-            self.bus.publish("activity_log", {
-                "text": "[System] No AI backend connected. "
-                        "Go to LLM tab and connect a provider.",
-            })
+            if self.timer:
+                self.timer.finish()
+            self._publish_error(
+                "Something is wrong with my AI — no backend is connected. "
+                "Go to the LLM tab and connect a provider."
+            )
             return None
 
         # Record user turn
@@ -129,11 +131,9 @@ class ConversationManager:
             if self.timer:
                 self.timer.stop("inference")
                 self.timer.finish()
-            error_msg = f"[Error] {e}"
-            self.bus.publish("activity_log", {"text": error_msg})
-            self.bus.publish("assistant_status", {
-                "lines": ["Error during inference"],
-            })
+            self._publish_error(
+                f"Something is wrong with my AI — {e}"
+            )
             return None
 
         if self.timer:
@@ -181,6 +181,20 @@ class ConversationManager:
         return list(self._history)
 
     # ── Event handler ─────────────────────────────────────────
+
+    def _publish_error(self, message: str) -> None:
+        """Show an error as a visible chat response and log it."""
+        self.bus.publish("assistant_response", {
+            "text": message,
+            "model": "System",
+            "error": True,
+        })
+        self.bus.publish("activity_log", {
+            "text": f"[Error] {message}",
+        })
+        self.bus.publish("assistant_status", {
+            "lines": ["Error during inference"],
+        })
 
     def _on_user_message(self, data: Dict[str, Any]) -> None:
         text = data.get("text", "").strip()

@@ -422,7 +422,9 @@ class CenterPanel(BasePanel):
 
         self._remove_last_system()
         model = data.get("model", "AI")
-        self._append_message(model, text, "#33d17a")
+        is_error = data.get("error", False)
+        colour = "#ef476f" if is_error else "#33d17a"
+        self._append_message(model, text, colour)
 
         self._waiting = False
         self._send_btn.setEnabled(True)

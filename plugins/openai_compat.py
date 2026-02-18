@@ -122,9 +122,15 @@ class OpenAICompatPlugin(AIPluginBase):
         stream: bool = False,
         **kwargs: Any,
     ) -> str | Iterator[str]:
+        if self._model is None:
+            raise RuntimeError(
+                "No model selected. Open the LLM tab and select a model, "
+                "then reconnect."
+            )
+
         url = f"{self._base_url}/v1/chat/completions"
         body: dict[str, Any] = {
-            "model": self._model.id if self._model else "default",
+            "model": self._model.id,
             "messages": messages,
             "stream": stream,
         }

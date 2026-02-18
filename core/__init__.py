@@ -12,3 +12,5 @@ from .decision import DecisionEngine, ResponseStrategy
 from .metacognition import MetacognitionEngine
 from .self_dev import SelfDevelopmentEngine
 from .timing import PipelineTimer
+from .system_monitor import SystemMonitor
+from .module_tracker import ModuleStatusTracker

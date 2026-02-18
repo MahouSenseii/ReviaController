@@ -17,7 +17,7 @@ from PyQt6.QtCharts import (
     QLineSeries,
     QValueAxis,
 )
-from PyQt6.QtCore import Qt, QPointF
+from PyQt6.QtCore import Qt, QMargins, QPointF
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
@@ -71,7 +71,7 @@ class LiveChart(QWidget):
         self._chart.setBackgroundBrush(_BG)
         self._chart.setPlotAreaBackgroundBrush(_BG)
         self._chart.setPlotAreaBackgroundVisible(True)
-        self._chart.setMargins(Qt.QMargins(4, 4, 4, 4))  # type: ignore[call-overload]
+        self._chart.setMargins(QMargins(4, 4, 4, 4))
 
         # Legend
         if show_legend:
