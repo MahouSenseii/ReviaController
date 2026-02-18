@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
     ):
         super().__init__()
         self.setWindowTitle("Revia Controller")
-        self.resize(1600, 950)
+        self.resize(1920, 1080)
 
         self.bus = event_bus
         self.config = config

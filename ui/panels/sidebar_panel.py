@@ -71,7 +71,7 @@ class SidebarPanel(BasePanel):
 
     def __init__(self, event_bus: EventBus, config: Config):
         super().__init__(event_bus, config)
-        self.setFixedWidth(260)
+        self.setFixedWidth(300)
 
     # ══════════════════════════════════════════════════════════
     # Build
@@ -218,7 +218,7 @@ class SidebarPanel(BasePanel):
             y_min=0.0,
             y_max=100.0,
             y_label="%",
-            height=160,
+            height=240,
             show_legend=True,
         )
         lay.addWidget(self._emotion_chart)
