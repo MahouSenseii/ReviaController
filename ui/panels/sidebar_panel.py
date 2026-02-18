@@ -71,7 +71,7 @@ class SidebarPanel(BasePanel):
 
     def __init__(self, event_bus: EventBus, config: Config):
         super().__init__(event_bus, config)
-        self.setFixedWidth(300)
+        self.setFixedWidth(500)
 
     # ══════════════════════════════════════════════════════════
     # Build
