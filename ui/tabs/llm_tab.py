@@ -258,7 +258,7 @@ class LLMTab(BaseTab):
 
         # Local server address
         self._local_address = self._make_line_edit(
-            placeholder="http://localhost:8080/v1",
+            placeholder="http://localhost:8080",
         )
         self._local_address.textChanged.connect(self._on_local_address_changed)
         lay.addWidget(self._row("Address", self._local_address))

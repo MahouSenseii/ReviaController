@@ -66,10 +66,11 @@ class OpenAICompatPlugin(AIPluginBase):
     # ── Lifecycle ─────────────────────────────────────────────
 
     def connect(self, config: dict[str, Any]) -> None:
-        self._base_url = (
-            config.get("base_url", "").rstrip("/")
-            or self._default_base_url
-        )
+        raw_url = config.get("base_url", "").strip().rstrip("/")
+        # Strip trailing /v1 — the code appends /v1/... to the base URL
+        if raw_url.endswith("/v1"):
+            raw_url = raw_url[:-3]
+        self._base_url = raw_url or self._default_base_url
         self._api_key = config.get("api_key", "")
         self._timeout = int(config.get("timeout", 120))
 
@@ -271,7 +272,21 @@ class OpenAICompatPlugin(AIPluginBase):
 
     def _fetch_models(self) -> list[ModelInfo]:
         """Fetch models from the /v1/models endpoint."""
-        data = self._get_json(f"{self._base_url}/v1/models")
+        url = f"{self._base_url}/v1/models"
+        try:
+            req = self._make_request(url)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            raise ConnectionError(
+                f"Server returned HTTP {e.code} from {url}. "
+                f"Check that the address does not already include '/v1'."
+            ) from e
+        except (urllib.error.URLError, OSError) as e:
+            raise ConnectionError(
+                f"Cannot reach {url}: {e}"
+            ) from e
+
         models: list[ModelInfo] = []
         for entry in data.get("data", []):
             mid = entry.get("id", "")
