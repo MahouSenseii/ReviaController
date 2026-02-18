@@ -2,7 +2,9 @@
 Revia Controller — Entry Point
 
 Creates the shared infrastructure (EventBus, Config, PluginManager),
-discovers plugins, and launches the UI.
+discovers plugins, initialises the emotion system with decision-making,
+metacognition, self-development, and pipeline timing, then launches
+the UI.
 """
 
 import sys
@@ -11,7 +13,17 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QApplication
 
-from core import Config, EventBus, PluginManager, EmotionEngine, ConversationManager
+from core import (
+    Config,
+    EventBus,
+    PluginManager,
+    EmotionEngine,
+    ConversationManager,
+    DecisionEngine,
+    MetacognitionEngine,
+    SelfDevelopmentEngine,
+    PipelineTimer,
+)
 from core.stimulus import StimulusAnalyser
 from main_window import MainWindow
 
@@ -32,8 +44,26 @@ def main() -> None:
     # Stimulus analyser — converts chat messages into emotion stimuli
     stimulus_analyser = StimulusAnalyser(bus)
 
-    # Conversation manager — orchestrates chat turns
-    conversation = ConversationManager(bus, config, pm, emotion_engine)
+    # Decision engine — emotion-driven response strategy selection
+    decision_engine = DecisionEngine(bus, emotion_engine)
+
+    # Metacognition — self-monitoring and reflection
+    metacognition = MetacognitionEngine(bus, emotion_engine)
+
+    # Self-development — learning from interactions over time
+    self_dev = SelfDevelopmentEngine(bus, emotion_engine)
+
+    # Pipeline timer — measures latency of every stage
+    timer = PipelineTimer(bus)
+
+    # Conversation manager — orchestrates chat turns with full pipeline
+    conversation = ConversationManager(
+        bus, config, pm, emotion_engine,
+        decision_engine=decision_engine,
+        metacognition=metacognition,
+        self_dev=self_dev,
+        timer=timer,
+    )
 
     # Emotion tick timer — natural decay every 2 seconds
     tick_timer = QTimer()

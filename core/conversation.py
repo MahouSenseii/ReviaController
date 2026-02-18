@@ -7,6 +7,12 @@ Responsibilities
 * Maintain an ordered list of ``{"role": ..., "content": ...}`` messages.
 * Inject the system prompt (from Behavior settings) and the emotion
   engine's context block.
+* Run the **decision engine** to select a response strategy based on
+  emotional state and conversation context.
+* Inject **metacognition** self-reflection and **learned preferences**
+  into the prompt so the AI can course-correct.
+* Time every pipeline stage via ``PipelineTimer`` and publish results
+  to the UI.
 * Send the assembled prompt to the active plugin and publish the
   response through the EventBus.
 * Publish ``activity_log`` events so the center panel stays updated.
@@ -14,12 +20,18 @@ Responsibilities
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .config import Config
 from .emotion_engine import EmotionEngine
 from .events import EventBus
 from .plugin_manager import PluginManager
+
+if TYPE_CHECKING:
+    from .decision import DecisionEngine
+    from .metacognition import MetacognitionEngine
+    from .self_dev import SelfDevelopmentEngine
+    from .timing import PipelineTimer
 
 
 class ConversationManager:
@@ -39,11 +51,19 @@ class ConversationManager:
         config: Config,
         plugin_manager: PluginManager,
         emotion_engine: Optional[EmotionEngine] = None,
+        decision_engine: Optional["DecisionEngine"] = None,
+        metacognition: Optional["MetacognitionEngine"] = None,
+        self_dev: Optional["SelfDevelopmentEngine"] = None,
+        timer: Optional["PipelineTimer"] = None,
     ):
         self.bus = event_bus
         self.config = config
         self.pm = plugin_manager
         self.emotion = emotion_engine
+        self.decision = decision_engine
+        self.metacognition = metacognition
+        self.self_dev = self_dev
+        self.timer = timer
 
         self._history: List[Dict[str, str]] = []
         self._max_history: int = 50  # keep last N turns
@@ -60,6 +80,10 @@ class ConversationManager:
         Also publishes events for UI updates.  Returns None if no
         plugin is active.
         """
+        # Start pipeline timer
+        if self.timer:
+            self.timer.begin()
+
         plugin = self.pm.active_plugin
         if plugin is None or not plugin.is_connected():
             self.bus.publish("activity_log", {
@@ -80,22 +104,40 @@ class ConversationManager:
             "lines": ["Processing...", "Generating Response..."],
         })
 
-        # Build messages
-        messages = self._build_messages()
+        # ── Decision engine ───────────────────────────────────
+        strategy = None
+        if self.decision:
+            if self.timer:
+                self.timer.start("decision")
+            strategy = self.decision.decide(user_text)
+            if self.timer:
+                self.timer.stop("decision")
 
-        # Inference
+        # Build messages (includes emotion + decision + metacognition)
+        messages = self._build_messages(strategy)
+
+        # ── Inference ─────────────────────────────────────────
+        if self.timer:
+            self.timer.start("inference")
+
         try:
             reply = plugin.send_prompt(messages, stream=False)
             if not isinstance(reply, str):
                 # Consume iterator if streaming was forced
                 reply = "".join(reply)
         except Exception as e:
+            if self.timer:
+                self.timer.stop("inference")
+                self.timer.finish()
             error_msg = f"[Error] {e}"
             self.bus.publish("activity_log", {"text": error_msg})
             self.bus.publish("assistant_status", {
                 "lines": ["Error during inference"],
             })
             return None
+
+        if self.timer:
+            self.timer.stop("inference")
 
         # Record assistant turn
         self._history.append({"role": "assistant", "content": reply})
@@ -112,7 +154,7 @@ class ConversationManager:
             "lines": ["Listening...", "Vision: Idle"],
         })
 
-        # Publish metrics
+        # Publish LLM metrics
         try:
             m = plugin.get_metrics()
             self.bus.publish("inference_metrics", {
@@ -123,6 +165,10 @@ class ConversationManager:
             })
         except Exception:
             pass
+
+        # ── Finish pipeline timing ────────────────────────────
+        if self.timer:
+            self.timer.finish()
 
         return reply
 
@@ -143,7 +189,7 @@ class ConversationManager:
 
     # ── Internal ──────────────────────────────────────────────
 
-    def _build_messages(self) -> List[Dict[str, str]]:
+    def _build_messages(self, strategy=None) -> List[Dict[str, str]]:
         """Assemble the full message list for the LLM."""
         messages: List[Dict[str, str]] = []
 
@@ -171,6 +217,24 @@ class ConversationManager:
             injection = ctx.get("prompt_injection", "")
             if injection:
                 system_parts.append(injection)
+
+        # Decision engine strategy — shapes *how* the AI responds
+        if strategy:
+            strategy_block = strategy.to_prompt_block()
+            if strategy_block:
+                system_parts.append(strategy_block)
+
+        # Metacognition self-reflection — lets the AI course-correct
+        if self.metacognition:
+            reflection = self.metacognition.get_reflection_block()
+            if reflection:
+                system_parts.append(reflection)
+
+        # Learned user preferences — adapt to this specific user
+        if self.self_dev:
+            prefs = self.self_dev.get_preference_hints()
+            if prefs:
+                system_parts.append(prefs)
 
         if system_parts:
             messages.append({
