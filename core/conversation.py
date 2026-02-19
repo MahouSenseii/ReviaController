@@ -89,6 +89,7 @@ class ConversationManager:
 
         self._history: List[Dict[str, str]] = []
         self._max_history: int = 50  # keep last N turns
+        self._has_greeted_user: bool = False
 
         # Cache the active model's registry entry (for stop tokens etc.)
         self._active_model_registry: Dict[str, Any] = {}
@@ -175,14 +176,16 @@ class ConversationManager:
         if self.timer:
             self.timer.stop("inference")
 
-        # Strip model artifact tokens if the model needs it
+        # Strip leaked model artifact tokens from every response.
+        # Some registries disable custom formatting, but we still want
+        # universal cleanup (e.g., leaked role tags / "Thinking...").
         reg = self._active_model_registry
+        extra_tokens: List[str] = []
         if reg.get("needs_formatting", True):
-            extra_tokens: List[str] = reg.get("stop_tokens", [])
-            if isinstance(extra_tokens, list):
-                reply = self._clean_response(reply, extra_tokens)
-            else:
-                reply = self._clean_response(reply)
+            configured_tokens = reg.get("stop_tokens", [])
+            if isinstance(configured_tokens, list):
+                extra_tokens = configured_tokens
+        reply = self._clean_response(reply, extra_tokens)
 
         # Record assistant turn
         self._history.append({"role": "assistant", "content": reply})
@@ -228,6 +231,7 @@ class ConversationManager:
     def clear_history(self) -> None:
         """Clear the conversation history."""
         self._history.clear()
+        self._has_greeted_user = False
 
     @property
     def history(self) -> List[Dict[str, str]]:
@@ -296,7 +300,8 @@ class ConversationManager:
                 identity_parts.append(f"Personality traits: {traits}.")
             if voice_tone:
                 identity_parts.append(f"Voice tone: {voice_tone}.")
-            if greeting:
+            should_greet = greeting and not self._has_greeted_user
+            if should_greet:
                 identity_parts.append(
                     f"When greeting users for the first time, say: {greeting}"
                 )
@@ -349,6 +354,10 @@ class ConversationManager:
 
         # Conversation history
         messages.extend(self._history)
+
+        # If we instructed a first-time greeting this turn, don't repeat it.
+        if greeting and not self._has_greeted_user:
+            self._has_greeted_user = True
         return messages
 
     @staticmethod
