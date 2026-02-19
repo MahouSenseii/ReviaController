@@ -289,8 +289,8 @@ class EmotionEngine:
             "[Emotional State]\n"
             f"{feeling_desc}\n"
             "Let this emotional awareness naturally influence your tone, "
-            "word choice, and expressiveness — but do not explicitly "
-            "mention that you have emotions unless asked."
+            "word choice, and expressiveness. You may acknowledge your "
+            "emotional state when it feels natural or when the user asks."
         )
 
         return {

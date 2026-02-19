@@ -25,6 +25,8 @@ from core import (
     PipelineTimer,
     SystemMonitor,
     ModuleStatusTracker,
+    STTManager,
+    TTSManager,
 )
 from core.stimulus import StimulusAnalyser
 from main_window import MainWindow
@@ -80,6 +82,12 @@ def main() -> None:
     # Module status tracker — keeps STT / TTS / Vision pills accurate
     module_tracker = ModuleStatusTracker(bus, pm)
     module_tracker.refresh_all()
+
+    # STT manager — microphone capture + speech-to-text transcription
+    stt_manager = STTManager(bus, config, pm)
+
+    # TTS manager — text-to-speech synthesis + audio playback
+    tts_manager = TTSManager(bus, config, pm)
 
     # Main window
     window = MainWindow(bus, config, pm, emotion_engine)
