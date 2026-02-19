@@ -972,6 +972,9 @@ class LLMTab(BaseTab):
             "category": "Allowed",
             "text": f"Connected to {plugin.name} — model: {model_name}",
         })
+        self.bus.publish("activity_log", {
+            "text": f"[System] Connected to {plugin.name} — model: {model_name}",
+        })
 
     def _on_connect_error(self, error_msg: str) -> None:
         """Called on the main thread when connection fails."""
@@ -987,6 +990,9 @@ class LLMTab(BaseTab):
         self.bus.publish("log_entry", {
             "category": "Filtered",
             "text": f"Connection failed: {error_msg}",
+        })
+        self.bus.publish("activity_log", {
+            "text": f"[Error] Connection failed: {error_msg}",
         })
 
     def _on_disconnect(self) -> None:
