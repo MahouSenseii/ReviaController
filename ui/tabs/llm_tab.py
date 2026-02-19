@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -56,11 +56,31 @@ _ONLINE_PROVIDERS = [
 ]
 
 
+class _ConnectWorker(QThread):
+    """Runs plugin activation in a background thread so the UI stays responsive."""
+    succeeded = pyqtSignal(object)   # emits the plugin instance
+    failed = pyqtSignal(str)         # emits the error message
+
+    def __init__(self, pm: PluginManager, plugin_name: str, cfg: dict):
+        super().__init__()
+        self._pm = pm
+        self._name = plugin_name
+        self._cfg = cfg
+
+    def run(self) -> None:
+        try:
+            plugin = self._pm.activate(self._name, self._cfg)
+            self.succeeded.emit(plugin)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
 class LLMTab(BaseTab):
 
     def __init__(self, event_bus: EventBus, config: Config, plugin_manager: PluginManager):
         self._pm = plugin_manager
         self._registry = LLMRegistry()
+        self._connect_worker: _ConnectWorker | None = None
         super().__init__(event_bus, config)
 
     # ══════════════════════════════════════════════════════════
@@ -809,7 +829,7 @@ class LLMTab(BaseTab):
                 self._backend_combo.setCurrentIndex(idx)
 
     def _on_connect(self) -> None:
-        """Activate the selected plugin and connect it."""
+        """Activate the selected plugin and connect it (async via thread)."""
         idx = self._backend_combo.currentIndex()
         if idx < 0:
             return
@@ -837,64 +857,102 @@ class LLMTab(BaseTab):
             if models and 0 <= lidx < len(models):
                 entry = models[lidx]
                 cfg["base_url"] = entry.get("address", "")
+                cfg["model_name"] = entry.get("name", "")
+                cfg["model_path"] = entry.get("path", "")
 
-        try:
-            plugin = self._pm.activate(plugin_name, cfg)
-            self.config.set("llm.backend", plugin_name)
-            self._conn_dot.set_status("on")
-            self._connect_btn.setEnabled(False)
-            self._disconnect_btn.setEnabled(True)
+        # Disable buttons and show progress while connecting
+        self._connect_btn.setEnabled(False)
+        self._disconnect_btn.setEnabled(False)
+        self._conn_dot.set_status("off")
+        self._conn_status_label.setText("Connecting... (loading model, please wait)")
+        self._conn_status_label.setStyleSheet(
+            "color:#f9c74f; font-size:11px; padding:2px 0;"
+        )
 
-            # Populate the model selector from the server's loaded models
-            self._populate_model_selector(plugin)
+        # Store context for the callbacks
+        self._pending_cfg = cfg
+        self._pending_is_online = is_online
+        self._pending_plugin_name = plugin_name
 
-            # Select the correct model on the now-connected plugin
-            if is_online and cfg.get("model_id"):
-                try:
-                    plugin.select_model(cfg["model_id"])
-                    # Sync the combo to match
-                    idx = self._model_select_combo.findData(cfg["model_id"])
-                    if idx >= 0:
-                        self._model_select_combo.blockSignals(True)
-                        self._model_select_combo.setCurrentIndex(idx)
-                        self._model_select_combo.blockSignals(False)
-                except Exception:
-                    pass
+        # Run the (potentially slow) activation in a background thread
+        self._connect_worker = _ConnectWorker(self._pm, plugin_name, cfg)
+        self._connect_worker.succeeded.connect(self._on_connect_success)
+        self._connect_worker.failed.connect(self._on_connect_error)
+        self._connect_worker.start()
 
-            # Report the active model
-            active = plugin.active_model()
-            model_name = active.name if active else "?"
-            self._conn_status_label.setText(
-                f"Connected: {plugin.name}  |  Model: {model_name}"
+    def _on_connect_success(self, plugin) -> None:
+        """Called on the main thread when the plugin is ready."""
+        cfg = self._pending_cfg
+        is_online = self._pending_is_online
+
+        self.config.set("llm.backend", self._pending_plugin_name)
+        self._conn_dot.set_status("on")
+        self._connect_btn.setEnabled(False)
+        self._disconnect_btn.setEnabled(True)
+
+        # Populate the model selector from the server's loaded models
+        self._populate_model_selector(plugin)
+
+        # Select the correct model on the now-connected plugin
+        desired_model_id = None
+        if is_online and cfg.get("model_id"):
+            desired_model_id = cfg["model_id"]
+        elif not is_online and cfg.get("model_name"):
+            # For local: try to match by name against server models
+            desired_model_id = self._match_local_model(
+                plugin, cfg["model_name"], cfg.get("model_path", ""),
             )
-            self._conn_status_label.setStyleSheet(
-                "color:#33d17a; font-size:11px; padding:2px 0;"
-            )
 
-            # Publish model info so the top bar and inference panel update
-            if active:
-                self.bus.publish("model_changed", {
-                    "model": active.name,
-                    "mode": "online" if is_online else "local",
-                    "registry": active.metadata,
-                })
+        if desired_model_id:
+            try:
+                plugin.select_model(desired_model_id)
+                # Sync the combo to match
+                idx = self._model_select_combo.findData(desired_model_id)
+                if idx >= 0:
+                    self._model_select_combo.blockSignals(True)
+                    self._model_select_combo.setCurrentIndex(idx)
+                    self._model_select_combo.blockSignals(False)
+            except Exception:
+                pass
 
-            self.bus.publish("log_entry", {
-                "category": "Allowed",
-                "text": f"Connected to {plugin.name} — model: {model_name}",
+        # Report the active model
+        active = plugin.active_model()
+        model_name = active.name if active else "?"
+        self._conn_status_label.setText(
+            f"Connected: {plugin.name}  |  Model: {model_name}"
+        )
+        self._conn_status_label.setStyleSheet(
+            "color:#33d17a; font-size:11px; padding:2px 0;"
+        )
+
+        # Publish model info so the top bar and inference panel update
+        if active:
+            self.bus.publish("model_changed", {
+                "model": active.name,
+                "mode": "online" if is_online else "local",
+                "registry": active.metadata,
             })
-        except Exception as e:
-            self._conn_dot.set_status("off")
-            self._conn_status_label.setText(f"Failed: {e}")
-            self._conn_status_label.setStyleSheet(
-                "color:#ef476f; font-size:11px; padding:2px 0;"
-            )
-            self._model_select_combo.setEnabled(False)
-            self._refresh_models_btn.setEnabled(False)
-            self.bus.publish("log_entry", {
-                "category": "Filtered",
-                "text": f"Connection failed: {e}",
-            })
+
+        self.bus.publish("log_entry", {
+            "category": "Allowed",
+            "text": f"Connected to {plugin.name} — model: {model_name}",
+        })
+
+    def _on_connect_error(self, error_msg: str) -> None:
+        """Called on the main thread when connection fails."""
+        self._conn_dot.set_status("off")
+        self._conn_status_label.setText(f"Failed: {error_msg}")
+        self._conn_status_label.setStyleSheet(
+            "color:#ef476f; font-size:11px; padding:2px 0;"
+        )
+        self._connect_btn.setEnabled(True)
+        self._disconnect_btn.setEnabled(False)
+        self._model_select_combo.setEnabled(False)
+        self._refresh_models_btn.setEnabled(False)
+        self.bus.publish("log_entry", {
+            "category": "Filtered",
+            "text": f"Connection failed: {error_msg}",
+        })
 
     def _on_disconnect(self) -> None:
         """Deactivate the current plugin."""
@@ -1011,3 +1069,45 @@ class LLMTab(BaseTab):
             pass
 
         self._populate_model_selector(plugin)
+
+    @staticmethod
+    def _match_local_model(plugin, model_name: str, model_path: str) -> str | None:
+        """
+        Try to match a user's local library entry against the server's
+        loaded models.  Returns the best-matching model ID, or None.
+
+        Matching strategy (in priority order):
+        1. Exact model ID match on name
+        2. Model ID contains the library name (e.g. Ollama "llama3:latest"
+           matches library name "llama3")
+        3. Model ID contains the filename stem from the model path
+           (e.g. server model "my-model.gguf" matches path
+           "/models/my-model.gguf")
+        """
+        from pathlib import Path as _Path
+
+        server_models = plugin.list_models()
+        if not server_models:
+            return None
+
+        name_lower = model_name.lower()
+        stem_lower = _Path(model_path).stem.lower() if model_path else ""
+
+        # Pass 1: exact ID match
+        for m in server_models:
+            if m.id.lower() == name_lower or m.name.lower() == name_lower:
+                return m.id
+
+        # Pass 2: server model contains the library name
+        if name_lower:
+            for m in server_models:
+                if name_lower in m.id.lower() or name_lower in m.name.lower():
+                    return m.id
+
+        # Pass 3: match on filename stem
+        if stem_lower:
+            for m in server_models:
+                if stem_lower in m.id.lower() or stem_lower in m.name.lower():
+                    return m.id
+
+        return None
