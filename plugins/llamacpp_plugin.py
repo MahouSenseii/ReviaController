@@ -36,6 +36,7 @@ class Plugin(OpenAICompatPlugin):
 
     def connect(self, config: dict[str, Any]) -> None:
         model_path = config.get("model_path", "")
+        server_binary = config.get("llama_server_path", "").strip()
 
         # Resolve target host/port from the base_url config
         raw_url = config.get("base_url", "").strip().rstrip("/")
@@ -49,7 +50,7 @@ class Plugin(OpenAICompatPlugin):
         # Auto-start the server if we have a local model and port is free
         if model_path and Path(model_path).is_file():
             if not self._is_port_in_use(host, port):
-                self._launch_server(model_path, host, port)
+                self._launch_server(model_path, host, port, server_binary)
 
         # Standard OpenAI-compat connect (verify + fetch models)
         super().connect(config)
@@ -71,13 +72,15 @@ class Plugin(OpenAICompatPlugin):
 
     def _launch_server(
         self, model_path: str, host: str, port: int,
+        server_binary: str = "",
     ) -> None:
-        binary = self._find_binary()
+        binary = self._find_binary(server_binary)
         if not binary:
             raise ConnectionError(
                 "Cannot find 'llama-server' on this system.\n\n"
-                "Install llama.cpp and make sure 'llama-server' is in "
-                "your PATH, or start the server manually before connecting."
+                "Install llama.cpp and make sure 'llama-server' is in your "
+                "PATH, set a custom binary path in the LLM settings, or "
+                "start the server manually before connecting."
             )
 
         cmd = [
@@ -146,8 +149,17 @@ class Plugin(OpenAICompatPlugin):
     # ── Helpers ────────────────────────────────────────────────
 
     @staticmethod
-    def _find_binary() -> str | None:
-        """Locate the ``llama-server`` executable."""
+    def _find_binary(custom_path: str = "") -> str | None:
+        """Locate the ``llama-server`` executable.
+
+        If *custom_path* is provided and points to an executable file it is
+        returned immediately, bypassing the automatic search.
+        """
+        if custom_path:
+            p = Path(custom_path)
+            if p.is_file():
+                return str(p)
+
         found = shutil.which("llama-server")
         if found:
             return found
@@ -174,4 +186,13 @@ class Plugin(OpenAICompatPlugin):
         schema["base_url"]["default"] = "http://localhost:8080"
         # llama.cpp doesn't need an API key
         schema.pop("api_key", None)
+        schema["llama_server_path"] = {
+            "type": "path",
+            "label": "llama-server Binary",
+            "default": "",
+            "description": (
+                "Full path to the llama-server executable. "
+                "Leave blank to search PATH and common install locations."
+            ),
+        }
         return schema
