@@ -17,13 +17,17 @@ All times are in milliseconds.  Results are published via the
 
 from __future__ import annotations
 
+import json
 import time
 from collections import deque
-from contextlib import contextmanager
-from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, Generator, Optional
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Deque, Dict, List, Optional
 
 from .events import EventBus
+
+_HISTORY_FILE = Path("timing_history.json")
+_MAX_SAVED = 500  # cap on-disk records
 
 
 # ------------------------------------------------------------------
@@ -134,7 +138,7 @@ class PipelineTimer:
     def finish(self) -> TimingRecord:
         """
         Stop the total timer, build a TimingRecord, publish it,
-        and return it.
+        persist it to disk, and return it.
         """
         self._total_watch.stop()
         self._running = False
@@ -150,11 +154,61 @@ class PipelineTimer:
         )
 
         self._history.append(record)
+        self._persist(record)
+
+        # Build event data: current values + rolling averages
+        data = record.to_dict()
+        n = len(self._history)
+        avg_n = min(n, 10)
+        data["avg_inference"] = f"{self.average_ms('inference', avg_n):.0f} ms"
+        data["avg_total"] = f"{self.average_ms('total', avg_n):.0f} ms"
+        data["avg_decision"] = f"{self.average_ms('decision', avg_n):.1f} ms"
+        data["runs"] = n
 
         # Publish for UI
-        self.bus.publish("pipeline_timing", record.to_dict())
+        self.bus.publish("pipeline_timing", data)
 
         return record
+
+    # ── Persistence ──────────────────────────────────────────
+
+    def _persist(self, record: TimingRecord) -> None:
+        """Append a timing record to the on-disk history file."""
+        try:
+            if _HISTORY_FILE.exists():
+                existing: List[dict] = json.loads(_HISTORY_FILE.read_text("utf-8"))
+                if not isinstance(existing, list):
+                    existing = []
+            else:
+                existing = []
+
+            existing.append({
+                "ts": record.timestamp,
+                "stimulus_ms": record.stimulus_ms,
+                "emotion_ms": record.emotion_ms,
+                "decision_ms": record.decision_ms,
+                "metacognition_ms": record.metacognition_ms,
+                "inference_ms": record.inference_ms,
+                "total_ms": record.total_ms,
+            })
+
+            # Trim to max saved records
+            if len(existing) > _MAX_SAVED:
+                existing = existing[-_MAX_SAVED:]
+
+            _HISTORY_FILE.write_text(json.dumps(existing, indent=2), "utf-8")
+        except Exception:
+            pass  # Never crash the pipeline over a log write
+
+    def load_history(self) -> List[dict]:
+        """Return the on-disk timing history (raw dicts)."""
+        try:
+            if _HISTORY_FILE.exists():
+                data = json.loads(_HISTORY_FILE.read_text("utf-8"))
+                return data if isinstance(data, list) else []
+        except Exception:
+            pass
+        return []
 
     # ── Query ─────────────────────────────────────────────────
 
