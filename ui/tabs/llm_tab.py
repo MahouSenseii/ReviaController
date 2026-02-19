@@ -290,6 +290,47 @@ class LLMTab(BaseTab):
         self._local_path_label.setStyleSheet("color:#8fa6c3; font-size:11px; padding:4px 0;")
         lay.addWidget(self._local_path_label)
 
+        # Separator
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("color:#263246;")
+        lay.addWidget(sep2)
+
+        lay.addWidget(self._heading("llama.cpp Settings"))
+
+        # llama-server binary path
+        server_bin_row = QWidget()
+        sbh = QHBoxLayout(server_bin_row)
+        sbh.setContentsMargins(0, 0, 0, 0)
+        sbh.setSpacing(8)
+
+        self._llama_server_path_edit = QLineEdit()
+        self._llama_server_path_edit.setObjectName("SettingsLineEdit")
+        self._llama_server_path_edit.setPlaceholderText(
+            "Auto-detect (PATH / common locations)"
+        )
+        self._llama_server_path_edit.setText(
+            self.config.get("llm.llama_server_path", "")
+        )
+        self._llama_server_path_edit.textChanged.connect(self._on_llama_server_path_changed)
+        sbh.addWidget(self._llama_server_path_edit, 1)
+
+        self._llama_server_browse_btn = QPushButton("Browse...")
+        self._llama_server_browse_btn.setObjectName("ModeButton")
+        self._llama_server_browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._llama_server_browse_btn.clicked.connect(self._on_browse_llama_server)
+        sbh.addWidget(self._llama_server_browse_btn)
+
+        lay.addWidget(self._row("llama-server Binary", server_bin_row))
+
+        server_path_hint = QLabel(
+            "Path to the llama-server executable. Leave blank to search PATH and "
+            "common install locations automatically."
+        )
+        server_path_hint.setWordWrap(True)
+        server_path_hint.setStyleSheet("color:#8fa6c3; font-size:11px; padding:4px 0;")
+        lay.addWidget(server_path_hint)
+
         lay.addStretch(1)
         return page
 
@@ -423,6 +464,19 @@ class LLMTab(BaseTab):
         self._registry.upsert_local(
             name=entry["name"], path=entry["path"], address=text,
         )
+
+    def _on_llama_server_path_changed(self, text: str) -> None:
+        self.config.set("llm.llama_server_path", text.strip())
+
+    def _on_browse_llama_server(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select llama-server Executable",
+            "",
+            "Executable Files (llama-server llama-server.exe *);;All Files (*)",
+        )
+        if path:
+            self._llama_server_path_edit.setText(path)
 
     def _on_local_selected(self, idx: int) -> None:
         models = self._get_local_models()
@@ -859,6 +913,7 @@ class LLMTab(BaseTab):
                 cfg["base_url"] = entry.get("address", "")
                 cfg["model_name"] = entry.get("name", "")
                 cfg["model_path"] = entry.get("path", "")
+            cfg["llama_server_path"] = self.config.get("llm.llama_server_path", "")
 
         # Disable buttons and show progress while connecting
         self._connect_btn.setEnabled(False)
