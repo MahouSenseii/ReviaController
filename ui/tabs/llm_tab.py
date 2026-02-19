@@ -994,6 +994,11 @@ class LLMTab(BaseTab):
         self.bus.publish("activity_log", {
             "text": f"[Error] Connection failed: {error_msg}",
         })
+        self.bus.publish("assistant_response", {
+            "text": f"Connection failed: {error_msg}",
+            "model": "System",
+            "error": True,
+        })
 
     def _on_disconnect(self) -> None:
         """Deactivate the current plugin."""
