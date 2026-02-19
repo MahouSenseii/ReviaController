@@ -131,17 +131,26 @@ class ModuleStatusTracker(QObject):
         required_cap = _MODULE_CAPS.get(module)
         if required_cap and not (plugin.capabilities & required_cap):
             plugin_name = type(plugin).__name__
-            subtitle = f"Backend ({plugin_name}) does not support {module.upper()}"
-            self._bus.publish("module_status", {
-                "module": module,
-                "status": "warn",
-                "subtitle": subtitle,
-            })
-            self._bus.publish("activity_log", {
-                "text": f"[Error] {module_name} is unavailable: the active backend "
-                        f"({plugin_name}) does not advertise the {module.upper()} "
-                        f"capability. Switch to a backend that supports it.",
-            })
+            if module == "vision":
+                # Local webcam/screen capture works independently of the AI plugin.
+                # Report the capture as active; no chat error needed.
+                self._bus.publish("module_status", {
+                    "module": module,
+                    "status": "on",
+                    "subtitle": "Webcam active",
+                })
+            else:
+                subtitle = f"Backend ({plugin_name}) does not support {module.upper()}"
+                self._bus.publish("module_status", {
+                    "module": module,
+                    "status": "warn",
+                    "subtitle": subtitle,
+                })
+                self._bus.publish("activity_log", {
+                    "text": f"[Error] {module_name} is unavailable: the active backend "
+                            f"({plugin_name}) does not advertise the {module.upper()} "
+                            f"capability. Switch to a backend that supports it.",
+                })
             return
 
         # Everything looks good

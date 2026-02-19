@@ -628,7 +628,7 @@ class CenterPanel(BasePanel):
         if not text or self._waiting:
             return
 
-        self._append_message("You", text, "#7fb3ff")
+        self._append_message("you", text, "#7fb3ff")
         self._chat_input.clear()
         self._waiting = True
         self._send_btn.setEnabled(False)
