@@ -20,6 +20,29 @@ from PyQt6.QtWidgets import (
 
 from .base_tab import BaseTab
 
+# Optional: sounddevice for audio input enumeration
+try:
+    import sounddevice as _sd
+    _SD_AVAILABLE = True
+except ImportError:
+    _SD_AVAILABLE = False
+
+
+def _list_input_devices() -> list[str]:
+    """Return a list of audio input device names, or a placeholder list."""
+    if not _SD_AVAILABLE:
+        return ["(install sounddevice to list devices)"]
+    try:
+        devices = _sd.query_devices()
+        inputs = [
+            f"{i}: {d['name']}"
+            for i, d in enumerate(devices)
+            if d["max_input_channels"] > 0
+        ]
+        return inputs if inputs else ["(no input devices found)"]
+    except Exception:
+        return ["(error querying devices)"]
+
 
 class VoiceVisionTab(BaseTab):
 
@@ -36,6 +59,37 @@ class VoiceVisionTab(BaseTab):
             lambda v: self._save("voice.stt_engine", v)
         )
         lay.addWidget(self._row("Engine", self._stt_engine))
+
+        # ── Input Device (microphone) picker ──────────────────
+        mic_widget = QWidget()
+        mic_h = QHBoxLayout(mic_widget)
+        mic_h.setContentsMargins(0, 0, 0, 0)
+        mic_h.setSpacing(8)
+
+        self._stt_device = self._make_combo([])
+        self._stt_device.setToolTip(
+            "Select which microphone or audio input device the STT listens from."
+        )
+        self._stt_device.currentTextChanged.connect(self._on_stt_device_changed)
+        mic_h.addWidget(self._stt_device, 1)
+
+        self._mic_refresh_btn = QPushButton("Refresh")
+        self._mic_refresh_btn.setObjectName("ModeButton")
+        self._mic_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._mic_refresh_btn.setToolTip("Re-scan audio input devices")
+        self._mic_refresh_btn.clicked.connect(self._refresh_input_devices)
+        mic_h.addWidget(self._mic_refresh_btn)
+
+        self._mic_row = self._row("Input Device", mic_widget)
+        lay.addWidget(self._mic_row)
+
+        if not _SD_AVAILABLE:
+            hint = QLabel(
+                "Install 'sounddevice' (pip install sounddevice) to enable device selection."
+            )
+            hint.setWordWrap(True)
+            hint.setStyleSheet("color:#f9c74f; font-size:11px; padding:2px 0;")
+            lay.addWidget(hint)
 
         self._stt_lang = self._make_combo(
             ["Auto", "English", "Spanish", "French", "German", "Japanese", "Chinese"],
@@ -189,7 +243,30 @@ class VoiceVisionTab(BaseTab):
             self._role_edits[key] = edit
             lay.addWidget(self._row(label, edit))
 
+        # Populate mic devices then restore all saved values
+        self._refresh_input_devices(restore=False)
         self._load_saved()
+
+    # ── Audio input device picker ──────────────────────────────
+
+    def _refresh_input_devices(self, restore: bool = True) -> None:
+        """Re-enumerate audio input devices and repopulate the combo."""
+        devices = _list_input_devices()
+        self._stt_device.blockSignals(True)
+        self._stt_device.clear()
+        self._stt_device.addItems(devices)
+        self._stt_device.blockSignals(False)
+
+        if restore:
+            saved = self.config.get("voice.stt_device", "")
+            if saved:
+                idx = self._stt_device.findText(str(saved))
+                if idx >= 0:
+                    self._stt_device.setCurrentIndex(idx)
+
+    def _on_stt_device_changed(self, value: str) -> None:
+        if value and not value.startswith("("):
+            self._save("voice.stt_device", value)
 
     # ── Vision source toggle ───────────────────────────────────
 
@@ -198,6 +275,8 @@ class VoiceVisionTab(BaseTab):
         is_webcam = value == "Webcam"
         self._camera_index_row.setVisible(is_webcam)
         self._camera_res_row.setVisible(is_webcam)
+        # Notify center panel so it can start/stop webcam preview
+        self.bus.publish("vision_source_changed", {"source": value})
 
     # ── Voice cloning reference browse ────────────────────────
 
@@ -221,6 +300,13 @@ class VoiceVisionTab(BaseTab):
         _restore_combo(self._clone_engine, self.config.get("voice.clone_engine"))
         _restore_combo(self._vision_source, self.config.get("vision.source"))
         _restore_combo(self._camera_res,   self.config.get("vision.camera_resolution"))
+
+        # Restore saved mic device selection
+        saved_device = self.config.get("voice.stt_device", "")
+        if saved_device:
+            idx = self._stt_device.findText(str(saved_device))
+            if idx >= 0:
+                self._stt_device.setCurrentIndex(idx)
 
         val = self.config.get("voice.vad_threshold")
         if val is not None:

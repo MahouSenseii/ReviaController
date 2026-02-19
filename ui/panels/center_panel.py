@@ -10,7 +10,7 @@ is currently doing.
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QColor, QTextCursor
+from PyQt6.QtGui import QColor, QImage, QPixmap, QTextCursor
 from PyQt6.QtWidgets import (
     QFrame,
     QGraphicsDropShadowEffect,
@@ -25,9 +25,17 @@ from PyQt6.QtWidgets import (
 
 from core.config import Config
 from core.events import EventBus
-from ui.widgets import GhostPanel, StatusDot, make_panel, panel_inner
+from ui.widgets import StatusDot, make_panel, panel_inner
 
 from .base_panel import BasePanel
+
+# Optional: OpenCV for webcam capture
+try:
+    import cv2 as _cv2
+    _CV2_AVAILABLE = True
+except ImportError:
+    _cv2 = None  # type: ignore[assignment]
+    _CV2_AVAILABLE = False
 
 
 # ── Health glow colours ───────────────────────────────────────
@@ -35,6 +43,13 @@ _HEALTH = {
     "active":  ("#33d17a", "Active"),
     "warning": ("#f9c74f", "Issues"),
     "error":   ("#ef476f", "Offline"),
+}
+
+# Vision status colours
+_VISION_STATUS = {
+    "on":   ("#33d17a", "Vision Connected"),
+    "warn": ("#f9c74f", "Vision Warning"),
+    "off":  ("#5a6a7e", "Vision Inactive"),
 }
 
 
@@ -79,6 +94,176 @@ class _StatusItem(QWidget):
         self._dot.set_status("warn")
 
 
+class _WebcamPreview(QWidget):
+    """
+    Live webcam preview panel for the Inference section.
+
+    Shows real camera frames when the vision source is set to 'Webcam'
+    and OpenCV is available.  Falls back to a styled placeholder for all
+    other sources or when cv2 is not installed.
+
+    Also displays a small status bar that reflects whether Vision is
+    connected correctly to the AI backend.
+    """
+
+    _PLACEHOLDER_STYLE = (
+        "background:#080d16;"
+        "border:1px dashed #2a3b55;"
+        "border-radius:6px;"
+        "color:#3a4a5e;"
+        "font-size:12px;"
+    )
+
+    def __init__(self):
+        super().__init__()
+        self._cap = None          # cv2.VideoCapture or None
+        self._camera_index = 0
+        self._active = False
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+
+        # ── Frame display ─────────────────────────────────────
+        self._frame_label = QLabel()
+        self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._frame_label.setMinimumHeight(180)
+        self._frame_label.setStyleSheet(self._PLACEHOLDER_STYLE)
+        self._show_placeholder("Vision Preview")
+        outer.addWidget(self._frame_label, 1)
+
+        # ── Status bar ────────────────────────────────────────
+        status_row = QWidget()
+        status_row.setStyleSheet("background:transparent;")
+        sh = QHBoxLayout(status_row)
+        sh.setContentsMargins(4, 0, 4, 0)
+        sh.setSpacing(6)
+
+        self._vision_dot = StatusDot("off", size=8)
+        sh.addWidget(self._vision_dot, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self._vision_status_lbl = QLabel("Vision: Inactive")
+        self._vision_status_lbl.setStyleSheet(
+            "color:#5a6a7e; font-size:11px; font-style:italic;"
+        )
+        sh.addWidget(self._vision_status_lbl, 1)
+
+        self._source_lbl = QLabel("")
+        self._source_lbl.setStyleSheet("color:#3a4a5e; font-size:11px;")
+        sh.addWidget(self._source_lbl, 0)
+
+        outer.addWidget(status_row)
+
+        # ── Capture timer ─────────────────────────────────────
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._capture_frame)
+
+    # ── Public API ────────────────────────────────────────────
+
+    def set_vision_module_status(self, status: str, subtitle: str) -> None:
+        """Update the vision connection indicator (on / warn / off)."""
+        colour, text = _VISION_STATUS.get(status, _VISION_STATUS["off"])
+        self._vision_dot.set_status(status)
+        self._vision_status_lbl.setText(subtitle or text)
+        self._vision_status_lbl.setStyleSheet(f"color:{colour}; font-size:11px;")
+
+    def start_webcam(self, camera_index: int = 0, interval_ms: int = 66) -> None:
+        """Open the webcam at *camera_index* and start the frame timer."""
+        if not _CV2_AVAILABLE:
+            self._show_placeholder(
+                "Install 'opencv-python' to enable webcam preview\n"
+                "(pip install opencv-python)"
+            )
+            self._source_lbl.setText("cv2 not installed")
+            return
+
+        self._stop_capture()
+        self._camera_index = camera_index
+        try:
+            self._cap = _cv2.VideoCapture(camera_index)
+            if not self._cap.isOpened():
+                self._show_placeholder(
+                    f"Cannot open camera {camera_index}\n"
+                    "Check the Camera Index in Voice & Vision settings."
+                )
+                self._source_lbl.setText(f"Camera {camera_index} unavailable")
+                self._cap = None
+                return
+        except Exception as exc:
+            self._show_placeholder(f"Camera error: {exc}")
+            self._source_lbl.setText("Camera error")
+            self._cap = None
+            return
+
+        self._active = True
+        self._source_lbl.setText(f"Camera {camera_index}")
+        self._timer.start(interval_ms)
+
+    def stop_webcam(self) -> None:
+        """Stop webcam capture and return to placeholder."""
+        self._stop_capture()
+        self._show_placeholder("Vision Preview")
+        self._source_lbl.setText("")
+
+    def set_source_label(self, source: str) -> None:
+        """Update the non-webcam source label (Screen Capture, etc.)."""
+        if source == "Webcam":
+            return  # handled by start_webcam
+        self._source_lbl.setText(source)
+        self._show_placeholder(f"Source: {source}\n(preview not available here)")
+
+    # ── Internal ──────────────────────────────────────────────
+
+    def _stop_capture(self) -> None:
+        self._timer.stop()
+        self._active = False
+        if self._cap is not None:
+            try:
+                self._cap.release()
+            except Exception:
+                pass
+            self._cap = None
+
+    def _show_placeholder(self, text: str) -> None:
+        self._frame_label.setText(text)
+        self._frame_label.setPixmap(QPixmap())  # clear any previous frame
+        self._frame_label.setStyleSheet(self._PLACEHOLDER_STYLE)
+
+    def _capture_frame(self) -> None:
+        if self._cap is None or not _CV2_AVAILABLE:
+            return
+        ret, frame = self._cap.read()
+        if not ret or frame is None:
+            self._show_placeholder(
+                f"Camera {self._camera_index} lost signal.\n"
+                "Check connection or try a different Camera Index."
+            )
+            self._stop_capture()
+            return
+
+        # Convert BGR → RGB and show as QPixmap
+        rgb = _cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb.shape
+        qimg = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+        pix = QPixmap.fromImage(qimg)
+
+        # Scale to fit the label while keeping aspect ratio
+        label_size = self._frame_label.size()
+        scaled = pix.scaled(
+            label_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._frame_label.setPixmap(scaled)
+        self._frame_label.setStyleSheet(
+            "background:#000; border:1px solid #2a3b55; border-radius:6px;"
+        )
+
+    def closeEvent(self, event) -> None:
+        self._stop_capture()
+        super().closeEvent(event)
+
+
 class CenterPanel(BasePanel):
     """Main content area: runtime stats, status, chat, inference."""
 
@@ -120,6 +305,12 @@ class CenterPanel(BasePanel):
         self.bus.subscribe("decision_made", self._on_decision_made)
         self.bus.subscribe("metacognition_update", self._on_metacognition)
         self.bus.subscribe("self_dev_update", self._on_self_dev)
+        self.bus.subscribe("module_status", self._on_module_status)
+        self.bus.subscribe("vision_source_changed", self._on_vision_source_changed)
+        self.bus.subscribe("voice_vision_changed", self._on_voice_vision_changed)
+
+        # Apply saved vision source on startup
+        self._apply_saved_vision_source()
 
     # ══════════════════════════════════════════════════════════
     # Top bar
@@ -388,16 +579,45 @@ class CenterPanel(BasePanel):
         self._inference_label.setObjectName("MonoInfo")
         left.addWidget(self._inference_label)
 
+        # Emotion injection indicator
+        self._emotion_inject_lbl = QLabel("Emotion → LLM: Active")
+        self._emotion_inject_lbl.setStyleSheet(
+            "color:#33d17a; font-size:11px; margin-top:6px;"
+        )
+        self._emotion_inject_lbl.setToolTip(
+            "The AI's current emotional state (valence, arousal, dominant emotion, "
+            "mood trajectory) is injected into every system prompt so it influences "
+            "tone and word choice."
+        )
+        left.addWidget(self._emotion_inject_lbl)
+
+        left.addStretch(1)
+
         left_w = QWidget()
         left_w.setLayout(left)
         left_w.setFixedWidth(280)
         il.addWidget(left_w)
 
-        self._preview = GhostPanel("Preview / Whiteboard / Vision Frame", height=220)
-        il.addWidget(self._preview, 1)
+        # Live webcam / vision preview
+        self._webcam_preview = _WebcamPreview()
+        il.addWidget(self._webcam_preview, 1)
 
         inner.layout().addWidget(container)
         return p
+
+    # ══════════════════════════════════════════════════════════
+    # Vision helpers
+    # ══════════════════════════════════════════════════════════
+
+    def _apply_saved_vision_source(self) -> None:
+        """Apply the vision source stored in config on startup."""
+        source = self.config.get("vision.source", "Screen Capture")
+        cam_idx = int(self.config.get("vision.camera_index", 0))
+        interval = int(self.config.get("vision.interval_ms", 66))
+        if source == "Webcam":
+            self._webcam_preview.start_webcam(cam_idx, interval)
+        else:
+            self._webcam_preview.set_source_label(source)
 
     # ══════════════════════════════════════════════════════════
     # Chat logic
@@ -616,6 +836,47 @@ class CenterPanel(BasePanel):
             f"Context: {data.get('context', '-')}",
         ]
         self._inference_label.setText("\n".join(lines))
+
+    def _on_module_status(self, data: dict) -> None:
+        """Update the webcam preview's vision status indicator."""
+        if data.get("module") == "vision":
+            status = data.get("status", "off")
+            subtitle = data.get("subtitle", "")
+            self._webcam_preview.set_vision_module_status(status, subtitle)
+            # Mirror to the status dots section
+            if status == "on":
+                self._st_vision.set_active(True)
+                self._st_vision._label.setText("Vision: Active")
+            elif status == "warn":
+                self._st_vision.set_warn()
+                self._st_vision._label.setText(f"Vision: {subtitle}")
+            else:
+                self._st_vision.set_active(False)
+                self._st_vision._label.setText("Vision: Idle")
+
+    def _on_vision_source_changed(self, data: dict) -> None:
+        """Handle vision source changes from VoiceVisionTab."""
+        source = data.get("source", "Screen Capture")
+        cam_idx = int(self.config.get("vision.camera_index", 0))
+        interval = int(self.config.get("vision.interval_ms", 66))
+        if source == "Webcam":
+            self._webcam_preview.start_webcam(cam_idx, interval)
+        else:
+            self._webcam_preview.stop_webcam()
+            self._webcam_preview.set_source_label(source)
+
+    def _on_voice_vision_changed(self, data: dict) -> None:
+        """Handle individual vision setting changes (camera index, interval)."""
+        key = data.get("key", "")
+        value = data.get("value")
+        source = self.config.get("vision.source", "Screen Capture")
+
+        if key == "vision.camera_index" and source == "Webcam":
+            interval = int(self.config.get("vision.interval_ms", 66))
+            self._webcam_preview.start_webcam(int(value), interval)
+        elif key == "vision.interval_ms" and source == "Webcam":
+            cam_idx = int(self.config.get("vision.camera_index", 0))
+            self._webcam_preview.start_webcam(cam_idx, int(value))
 
     # ══════════════════════════════════════════════════════════
     # Pipeline Timing section
