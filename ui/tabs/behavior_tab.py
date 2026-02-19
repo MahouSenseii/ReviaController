@@ -64,7 +64,7 @@ _VERBOSITY_LEVELS = ["Low", "Medium", "High"]
 
 
 class BehaviorTab(BaseTab):
-    """AI Profile editor — saved as profile.json."""
+    """AI Profile editor — one data-set per profile, persisted in config."""
 
     def _build(self) -> None:
         lay = self._layout
@@ -219,15 +219,57 @@ class BehaviorTab(BaseTab):
         lay.addWidget(btn_row)
 
         # ── Load existing profile data ────────────────────────
+        self._current_profile_name: str = ""
+        self._loading: bool = False  # guard against spurious _update_field calls
         self._profile_data: dict = {}
-        self._load_saved()
+
+        # React whenever the user picks a different profile in the sidebar
+        self.bus.subscribe("profile_selected", self._on_profile_selected)
+        self._init_from_selected_profile()
 
     # ══════════════════════════════════════════════════════════
     # Profile persistence
     # ══════════════════════════════════════════════════════════
 
-    def _load_saved(self) -> None:
-        """Load profile.json (or defaults) into the UI."""
+    def _init_from_selected_profile(self) -> None:
+        """Load the profile that is currently active in the sidebar."""
+        selected = self.config.get("selected_profile", "")
+        if selected:
+            self._load_for_profile(selected)
+        else:
+            # Fallback: load from profile.json (legacy / no profile selected yet)
+            self._load_legacy()
+
+    def _on_profile_selected(self, data: dict) -> None:
+        """Called when the user switches profiles in the sidebar."""
+        name = data.get("value")
+        if not name:
+            return
+        if name != self._current_profile_name:
+            self._load_for_profile(name)
+
+    def _load_for_profile(self, name: str) -> None:
+        """Load the stored data for *name* (or sensible defaults) into the UI."""
+        self._current_profile_name = name
+
+        # Retrieve per-profile data stored in config
+        all_profiles_data = self.config.get("profiles_data") or {}
+        stored: dict = all_profiles_data.get(name, {}) if isinstance(all_profiles_data, dict) else {}
+
+        # Start from defaults, overlay stored values
+        profile_data = dict(_DEFAULT_PROFILE)
+        profile_data.update(stored)
+
+        # If this is a brand-new profile with no stored data, seed the
+        # character name from the sidebar profile name.
+        if not stored:
+            profile_data["character_name"] = name
+
+        self._profile_data = profile_data
+        self._populate_ui()
+
+    def _load_legacy(self) -> None:
+        """Load profile.json (or defaults) — used only when no profile is selected."""
         if _PROFILE_PATH.exists():
             try:
                 self._profile_data = json.loads(
@@ -236,7 +278,6 @@ class BehaviorTab(BaseTab):
             except (json.JSONDecodeError, OSError):
                 self._profile_data = {}
 
-        # Merge defaults for any missing keys
         for k, v in _DEFAULT_PROFILE.items():
             self._profile_data.setdefault(k, v)
 
@@ -244,22 +285,26 @@ class BehaviorTab(BaseTab):
 
     def _populate_ui(self) -> None:
         """Push current profile data into every widget."""
-        d = self._profile_data
+        self._loading = True
+        try:
+            d = self._profile_data
 
-        self._name_edit.setText(d.get("character_name", ""))
-        self._persona_edit.setPlainText(d.get("persona", ""))
-        self._traits_edit.setText(d.get("personality_traits", ""))
+            self._name_edit.setText(d.get("character_name", ""))
+            self._persona_edit.setPlainText(d.get("persona", ""))
+            self._traits_edit.setText(d.get("personality_traits", ""))
 
-        self._voice_path_edit.setText(d.get("voice_path", ""))
-        self._set_combo(self._tone_combo, d.get("voice_tone", "Neutral"))
-        self._lang_edit.setText(d.get("language", "English"))
+            self._voice_path_edit.setText(d.get("voice_path", ""))
+            self._set_combo(self._tone_combo, d.get("voice_tone", "Neutral"))
+            self._lang_edit.setText(d.get("language", "English"))
 
-        self._set_combo(self._style_combo, d.get("response_style", "Conversational"))
-        self._set_combo(self._verbosity_combo, d.get("verbosity", "Medium"))
-        self._fallback_edit.setText(d.get("fallback_message", ""))
-        self._greeting_edit.setText(d.get("greeting", ""))
+            self._set_combo(self._style_combo, d.get("response_style", "Conversational"))
+            self._set_combo(self._verbosity_combo, d.get("verbosity", "Medium"))
+            self._fallback_edit.setText(d.get("fallback_message", ""))
+            self._greeting_edit.setText(d.get("greeting", ""))
 
-        self._sys_prompt.setPlainText(d.get("system_prompt", ""))
+            self._sys_prompt.setPlainText(d.get("system_prompt", ""))
+        finally:
+            self._loading = False
 
     @staticmethod
     def _set_combo(combo: QComboBox, value: str) -> None:
@@ -269,8 +314,21 @@ class BehaviorTab(BaseTab):
 
     def _update_field(self, key: str, value: str) -> None:
         """Update in-memory profile and notify the bus."""
+        if self._loading:
+            return
+
         self._profile_data[key] = value
         self.bus.publish("profile_field_changed", {"key": key, "value": value})
+
+        # Persist the change immediately for the current profile
+        if self._current_profile_name:
+            all_profiles_data = self.config.get("profiles_data") or {}
+            if not isinstance(all_profiles_data, dict):
+                all_profiles_data = {}
+            profile_entry = dict(all_profiles_data.get(self._current_profile_name, {}))
+            profile_entry[key] = value
+            all_profiles_data[self._current_profile_name] = profile_entry
+            self.config.set("profiles_data", all_profiles_data)
 
         # Also mirror core behaviour keys into Config for backward compat
         if key in ("persona", "verbosity", "response_style", "system_prompt"):
@@ -278,9 +336,20 @@ class BehaviorTab(BaseTab):
             self.bus.publish("behavior_changed", {"key": f"behavior.{key}", "value": value})
 
     def _save_profile(self) -> None:
-        """Write profile.json to disk."""
+        """Persist the current profile to config and to a named JSON file."""
+        # Persist to config under the current profile name
+        if self._current_profile_name:
+            all_profiles_data = self.config.get("profiles_data") or {}
+            if not isinstance(all_profiles_data, dict):
+                all_profiles_data = {}
+            all_profiles_data[self._current_profile_name] = dict(self._profile_data)
+            self.config.set("profiles_data", all_profiles_data)
+
+        # Also write to a file named after the profile for easy export
+        safe_name = self._current_profile_name or "profile"
+        save_path = Path(f"{safe_name}.json") if self._current_profile_name else _PROFILE_PATH
         try:
-            _PROFILE_PATH.write_text(
+            save_path.write_text(
                 json.dumps(self._profile_data, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
@@ -288,7 +357,7 @@ class BehaviorTab(BaseTab):
             QMessageBox.information(
                 self,
                 "Profile Saved",
-                f"Profile saved to {_PROFILE_PATH.resolve()}",
+                f"Profile saved to {save_path.resolve()}",
             )
         except OSError as exc:
             QMessageBox.warning(self, "Save Error", str(exc))
@@ -311,6 +380,13 @@ class BehaviorTab(BaseTab):
             for k, v in _DEFAULT_PROFILE.items():
                 data.setdefault(k, v)
             self._profile_data = data
+            # Persist into the current profile's config slot
+            if self._current_profile_name:
+                all_profiles_data = self.config.get("profiles_data") or {}
+                if not isinstance(all_profiles_data, dict):
+                    all_profiles_data = {}
+                all_profiles_data[self._current_profile_name] = dict(data)
+                self.config.set("profiles_data", all_profiles_data)
             self._populate_ui()
             QMessageBox.information(
                 self, "Profile Loaded", f"Loaded profile from:\n{path}"
