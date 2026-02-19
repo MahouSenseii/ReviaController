@@ -14,3 +14,5 @@ from .self_dev import SelfDevelopmentEngine
 from .timing import PipelineTimer
 from .system_monitor import SystemMonitor
 from .module_tracker import ModuleStatusTracker
+from .stt_manager import STTManager
+from .tts_manager import TTSManager

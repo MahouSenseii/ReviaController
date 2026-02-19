@@ -127,10 +127,11 @@ class _WebcamPreview(QWidget):
         # ── Frame display ─────────────────────────────────────
         self._frame_label = QLabel()
         self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._frame_label.setMinimumHeight(180)
+        self._frame_label.setMinimumHeight(120)
+        self._frame_label.setMaximumHeight(180)
         self._frame_label.setStyleSheet(self._PLACEHOLDER_STYLE)
         self._show_placeholder("Vision Preview")
-        outer.addWidget(self._frame_label, 1)
+        outer.addWidget(self._frame_label, 0)
 
         # ── Status bar ────────────────────────────────────────
         status_row = QWidget()
@@ -600,7 +601,8 @@ class CenterPanel(BasePanel):
 
         # Live webcam / vision preview
         self._webcam_preview = _WebcamPreview()
-        il.addWidget(self._webcam_preview, 1)
+        self._webcam_preview.setMaximumHeight(220)
+        il.addWidget(self._webcam_preview, 0)
 
         inner.layout().addWidget(container)
         return p
@@ -761,6 +763,15 @@ class CenterPanel(BasePanel):
 
     def _on_user_message_status(self, data: dict) -> None:
         self._set_status_state("analyzing")
+        # If the message came from STT, show it in the chat display
+        if data.get("source") == "stt":
+            text = data.get("text", "")
+            if text:
+                self._append_message("you (voice)", text, "#7fb3ff")
+                self._waiting = True
+                self._send_btn.setEnabled(False)
+                self._chat_input.setEnabled(False)
+                self._append_system("Thinking...")
 
     def _on_assistant_status(self, data: dict) -> None:
         # Prefer the explicit stage key (new-style events)

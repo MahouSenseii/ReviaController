@@ -94,10 +94,20 @@ class ConversationManager:
         # Cache the active model's registry entry (for stop tokens etc.)
         self._active_model_registry: Dict[str, Any] = {}
 
+        # Cached profile data — loaded from config on profile selection
+        self._cached_profile: Dict[str, Any] = {}
+        self._load_active_profile()
+
         # Listen for user messages from UI
         self.bus.subscribe("user_message", self._on_user_message)
         # Cache registry metadata whenever the active model changes
         self.bus.subscribe("model_changed", self._on_model_changed_registry)
+        # Reload profile when user selects a different one in the sidebar
+        self.bus.subscribe("profile_selected", self._on_profile_selected)
+        # Reload profile when fields are edited in the Behavior tab
+        self.bus.subscribe("profile_field_changed", self._on_profile_field_changed)
+        # Reload profile when it's saved from the Behavior tab
+        self.bus.subscribe("profile_saved", self._on_profile_saved)
 
     # ── Public API ────────────────────────────────────────────
 
@@ -262,6 +272,27 @@ class ConversationManager:
         """Cache the active model's registry metadata for use in send()."""
         self._active_model_registry = data.get("registry", {})
 
+    def _on_profile_selected(self, data: Dict[str, Any]) -> None:
+        """Reload profile data when the user switches profiles in the sidebar."""
+        name = data.get("value")
+        if name:
+            self._load_active_profile(name)
+            # Reset greeting flag so the new profile can greet
+            self._has_greeted_user = False
+
+    def _on_profile_field_changed(self, data: Dict[str, Any]) -> None:
+        """Update cached profile when a field is edited in the Behavior tab."""
+        key = data.get("key", "")
+        value = data.get("value", "")
+        if key and self._cached_profile:
+            self._cached_profile[key] = value
+
+    def _on_profile_saved(self, data: Dict[str, Any]) -> None:
+        """Reload profile when it's saved from the Behavior tab."""
+        if isinstance(data, dict) and data:
+            self._cached_profile = dict(data)
+            self._sync_profile_to_disk()
+
     # ── Internal ──────────────────────────────────────────────
 
     def _build_messages(self, strategy=None) -> List[Dict[str, str]]:
@@ -370,16 +401,64 @@ class ConversationManager:
             text = text.replace(tok, "")
         return text.strip()
 
-    @staticmethod
-    def _load_profile() -> Dict[str, Any]:
-        """Load the AI profile from profile.json, returning {} on failure."""
-        if not _PROFILE_PATH.exists():
-            return {}
+    def _load_profile(self) -> Dict[str, Any]:
+        """Return the currently cached profile data.
+
+        The cache is populated from ``config["profiles_data"]`` whenever a
+        profile is selected, and falls back to the legacy ``profile.json``
+        file when no profile has been selected yet.
+        """
+        if self._cached_profile:
+            return self._cached_profile
+        # Fallback: read legacy file
+        if _PROFILE_PATH.exists():
+            try:
+                data = json.loads(_PROFILE_PATH.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {}
+
+    def _load_active_profile(self, name: str | None = None) -> None:
+        """Load profile data from config for *name* (or the selected profile).
+
+        Also syncs the data to ``profile.json`` so other components
+        (StimulusAnalyser, etc.) can read it.
+        """
+        if name is None:
+            name = self.config.get("selected_profile", "")
+
+        if not name:
+            # No profile selected — try legacy file
+            self._cached_profile = {}
+            return
+
+        all_data = self.config.get("profiles_data") or {}
+        if not isinstance(all_data, dict):
+            all_data = {}
+
+        stored = all_data.get(name, {})
+        if stored:
+            self._cached_profile = dict(stored)
+        else:
+            # Brand-new profile with no behavior data yet — seed name
+            self._cached_profile = {"character_name": name}
+
+        # Sync to profile.json so StimulusAnalyser and other consumers see it
+        self._sync_profile_to_disk()
+
+    def _sync_profile_to_disk(self) -> None:
+        """Write the cached profile to profile.json for other components."""
+        if not self._cached_profile:
+            return
         try:
-            data = json.loads(_PROFILE_PATH.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
-        except (json.JSONDecodeError, OSError):
-            return {}
+            _PROFILE_PATH.write_text(
+                json.dumps(self._cached_profile, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
     def _trim_history(self) -> None:
         """Keep only the last N messages to avoid unbounded growth."""
