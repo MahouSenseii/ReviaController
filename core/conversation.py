@@ -31,6 +31,24 @@ from .plugin_manager import PluginManager
 
 _PROFILE_PATH = Path("profile.json")
 
+# Tokens that some models leak into their output but should never be shown.
+_DEFAULT_STOP_TOKENS: list[str] = [
+    "<|im_end|>",
+    "<|im_start|>",
+    "<|assistant|>",
+    "<|user|>",
+    "<|system|>",
+    "<|end|>",
+    "<|endoftext|>",
+    "[INST]",
+    "[/INST]",
+    "<<SYS>>",
+    "<</SYS>>",
+    "<s>",
+    "</s>",
+    "Thinking...",
+]
+
 if TYPE_CHECKING:
     from .decision import DecisionEngine
     from .metacognition import MetacognitionEngine
@@ -72,8 +90,13 @@ class ConversationManager:
         self._history: List[Dict[str, str]] = []
         self._max_history: int = 50  # keep last N turns
 
+        # Cache the active model's registry entry (for stop tokens etc.)
+        self._active_model_registry: Dict[str, Any] = {}
+
         # Listen for user messages from UI
         self.bus.subscribe("user_message", self._on_user_message)
+        # Cache registry metadata whenever the active model changes
+        self.bus.subscribe("model_changed", self._on_model_changed_registry)
 
     # ── Public API ────────────────────────────────────────────
 
@@ -143,13 +166,30 @@ class ConversationManager:
         if self.timer:
             self.timer.stop("inference")
 
+        # Strip model artifact tokens if the model needs it
+        reg = self._active_model_registry
+        if reg.get("needs_formatting", True):
+            extra_tokens: List[str] = reg.get("stop_tokens", [])
+            if isinstance(extra_tokens, list):
+                reply = self._clean_response(reply, extra_tokens)
+            else:
+                reply = self._clean_response(reply)
+
         # Record assistant turn
         self._history.append({"role": "assistant", "content": reply})
+
+        # Use the AI's character name (from profile.json) as the chat label,
+        # falling back to the plugin's model name if no profile is configured.
+        profile = self._load_profile()
+        display_name = (
+            profile.get("character_name")
+            or (plugin.active_model().name if plugin.active_model() else "AI")
+        )
 
         # Publish response
         self.bus.publish("assistant_response", {
             "text": reply,
-            "model": plugin.active_model().name if plugin.active_model() else "?",
+            "model": display_name,
         })
         self.bus.publish("activity_log", {
             "text": f'AI: "{reply[:200]}{"..." if len(reply) > 200 else ""}"',
@@ -204,6 +244,10 @@ class ConversationManager:
         text = data.get("text", "").strip()
         if text:
             self.send(text)
+
+    def _on_model_changed_registry(self, data: Dict[str, Any]) -> None:
+        """Cache the active model's registry metadata for use in send()."""
+        self._active_model_registry = data.get("registry", {})
 
     # ── Internal ──────────────────────────────────────────────
 
@@ -297,6 +341,16 @@ class ConversationManager:
         # Conversation history
         messages.extend(self._history)
         return messages
+
+    @staticmethod
+    def _clean_response(text: str, extra_tokens: List[str] | None = None) -> str:
+        """Strip artifact/stop tokens from a raw model reply."""
+        tokens = list(_DEFAULT_STOP_TOKENS)
+        if extra_tokens:
+            tokens.extend(extra_tokens)
+        for tok in tokens:
+            text = text.replace(tok, "")
+        return text.strip()
 
     @staticmethod
     def _load_profile() -> Dict[str, Any]:

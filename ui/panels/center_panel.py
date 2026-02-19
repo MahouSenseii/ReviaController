@@ -449,19 +449,31 @@ class CenterPanel(BasePanel):
                 self._set_status_state("listening")
 
     def _append_message(self, sender: str, text: str, colour: str) -> None:
-        escaped = (
-            text.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\n", "<br>")
-        )
+        def _esc(s: str) -> str:
+            return (
+                s.replace("&", "&amp;")
+                 .replace("<", "&lt;")
+                 .replace(">", "&gt;")
+            )
+
+        # Split into paragraphs on double newline; single newline → <br>
+        paragraphs = text.split("\n\n")
+        body_parts: list[str] = []
+        for para in paragraphs:
+            para_html = _esc(para).replace("\n", "<br>")
+            body_parts.append(
+                f'<p style="margin:0 0 4px 0; padding:0; '
+                f'color:#d8e1ee; font-size:13px; line-height:1.6;">'
+                f'{para_html}</p>'
+            )
+
         html = (
-            f'<div style="margin-bottom:12px;">'
-            f'<span style="color:{colour}; font-weight:700; font-size:12px;">'
-            f'{sender}</span><br>'
-            f'<span style="color:#d8e1ee; font-size:13px; line-height:1.5;">'
-            f'{escaped}</span>'
-            f'</div>'
+            f'<div style="margin-bottom:14px;">'
+            f'<p style="margin:0 0 3px 0; padding:0; '
+            f'color:{colour}; font-weight:700; font-size:12px;">'
+            f'{_esc(sender)}</p>'
+            + "".join(body_parts)
+            + f'</div>'
         )
         cursor = self._chat_display.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)

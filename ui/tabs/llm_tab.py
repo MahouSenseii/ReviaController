@@ -290,6 +290,47 @@ class LLMTab(BaseTab):
         self._local_path_label.setStyleSheet("color:#8fa6c3; font-size:11px; padding:4px 0;")
         lay.addWidget(self._local_path_label)
 
+        # ── Model Formatting ──────────────────────────────────
+        sep_fmt = QFrame()
+        sep_fmt.setFrameShape(QFrame.Shape.HLine)
+        sep_fmt.setStyleSheet("color:#263246;")
+        lay.addWidget(sep_fmt)
+
+        lay.addWidget(self._heading("Model Formatting"))
+
+        # Stop tokens (comma-separated)
+        self._stop_tokens_edit = QLineEdit()
+        self._stop_tokens_edit.setObjectName("SettingsLineEdit")
+        self._stop_tokens_edit.setPlaceholderText(
+            "Extra tokens to strip, e.g.  <|im_end|>, </s>"
+        )
+        self._stop_tokens_edit.textChanged.connect(self._on_model_format_changed)
+        lay.addWidget(self._row("Stop Tokens", self._stop_tokens_edit))
+
+        # Chat template
+        self._chat_template_combo = QComboBox()
+        self._chat_template_combo.setObjectName("SettingsCombo")
+        self._chat_template_combo.setMinimumHeight(28)
+        self._chat_template_combo.addItems([
+            "auto", "chatml", "llama3", "mistral", "gemma",
+            "alpaca", "vicuna", "phi3", "deepseek",
+        ])
+        self._chat_template_combo.currentTextChanged.connect(self._on_model_format_changed)
+        lay.addWidget(self._row("Chat Template", self._chat_template_combo))
+
+        # Needs formatting toggle
+        fmt_toggle_row = QWidget()
+        ft = QHBoxLayout(fmt_toggle_row)
+        ft.setContentsMargins(0, 0, 0, 0)
+        ft.setSpacing(8)
+        self._needs_fmt_toggle = ToggleSwitch(checked=True, width=44, height=22)
+        self._needs_fmt_toggle.toggled.connect(self._on_model_format_changed)
+        ft.addWidget(self._needs_fmt_toggle)
+        fmt_hint = QLabel("Strip artifact tokens from responses")
+        fmt_hint.setStyleSheet("color:#8fa6c3; font-size:12px;")
+        ft.addWidget(fmt_hint, 1)
+        lay.addWidget(self._row("Clean Output", fmt_toggle_row))
+
         # Separator
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
@@ -478,6 +519,30 @@ class LLMTab(BaseTab):
         if path:
             self._llama_server_path_edit.setText(path)
 
+    def _on_model_format_changed(self, *_args) -> None:
+        """Save stop_tokens / chat_template / needs_formatting to the registry."""
+        idx = self._local_combo.currentIndex()
+        models = self._get_local_models()
+        if not models or idx < 0 or idx >= len(models):
+            return
+
+        entry = models[idx]
+        reg_entry = self._registry.find_by_name(entry["name"])
+        if reg_entry is None:
+            return
+
+        raw_tokens = self._stop_tokens_edit.text()
+        stop_tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
+        chat_template = self._chat_template_combo.currentText()
+        needs_formatting = self._needs_fmt_toggle.isChecked()
+
+        self._registry.patch(
+            reg_entry["id"],
+            stop_tokens=stop_tokens,
+            chat_template=chat_template,
+            needs_formatting=needs_formatting,
+        )
+
     def _on_local_selected(self, idx: int) -> None:
         models = self._get_local_models()
         if not models or idx < 0 or idx >= len(models):
@@ -521,20 +586,50 @@ class LLMTab(BaseTab):
         self._local_rename_btn.setEnabled(has)
         self._local_rename_edit.setEnabled(has)
         self._local_address.setEnabled(has)
+        self._stop_tokens_edit.setEnabled(has)
+        self._chat_template_combo.setEnabled(has)
+        self._needs_fmt_toggle.setEnabled(has)
 
         if has:
             entry = models[idx]
             self._local_path_label.setText(f"Path: {entry['path']}")
             self._local_rename_edit.setPlaceholderText(f"Currently: {entry['name']}")
+
             self._local_address.blockSignals(True)
             self._local_address.setText(entry.get("address", ""))
             self._local_address.blockSignals(False)
+
+            # Load formatting metadata from registry
+            reg = self._registry.find_by_name(entry["name"]) or {}
+
+            self._stop_tokens_edit.blockSignals(True)
+            self._stop_tokens_edit.setText(", ".join(reg.get("stop_tokens", [])))
+            self._stop_tokens_edit.blockSignals(False)
+
+            self._chat_template_combo.blockSignals(True)
+            tmpl = reg.get("chat_template", "auto")
+            tidx = self._chat_template_combo.findText(tmpl)
+            self._chat_template_combo.setCurrentIndex(tidx if tidx >= 0 else 0)
+            self._chat_template_combo.blockSignals(False)
+
+            self._needs_fmt_toggle.blockSignals(True)
+            self._needs_fmt_toggle.setChecked(reg.get("needs_formatting", True))
+            self._needs_fmt_toggle.blockSignals(False)
         else:
             self._local_path_label.setText("No model selected")
             self._local_rename_edit.setPlaceholderText("Add a model first...")
+
             self._local_address.blockSignals(True)
             self._local_address.clear()
             self._local_address.blockSignals(False)
+
+            self._stop_tokens_edit.blockSignals(True)
+            self._stop_tokens_edit.clear()
+            self._stop_tokens_edit.blockSignals(False)
+
+            self._chat_template_combo.blockSignals(True)
+            self._chat_template_combo.setCurrentIndex(0)
+            self._chat_template_combo.blockSignals(False)
 
     # ══════════════════════════════════════════════════════════
     # ONLINE page
@@ -980,12 +1075,27 @@ class LLMTab(BaseTab):
             "color:#33d17a; font-size:11px; padding:2px 0;"
         )
 
-        # Publish model info so the top bar and inference panel update
+        # Publish model info so the top bar and inference panel update.
+        # Merge plugin metadata with our llm_registry entry so that
+        # stop_tokens / chat_template / needs_formatting are included.
         if active:
+            reg: dict = {}
+            if is_online:
+                models = self._get_online_models()
+                oidx = self._online_combo.currentIndex()
+                if models and 0 <= oidx < len(models):
+                    reg = self._registry.find_by_name(models[oidx]["name"]) or {}
+            else:
+                models = self._get_local_models()
+                lidx = self._local_combo.currentIndex()
+                if models and 0 <= lidx < len(models):
+                    reg = self._registry.find_by_name(models[lidx]["name"]) or {}
+            # Plugin metadata (context window etc.) takes lower priority
+            merged = {**(active.metadata or {}), **reg}
             self.bus.publish("model_changed", {
                 "model": active.name,
                 "mode": "online" if is_online else "local",
-                "registry": active.metadata,
+                "registry": merged,
             })
 
         self.bus.publish("log_entry", {

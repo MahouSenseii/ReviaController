@@ -9,21 +9,24 @@ so look-ups are O(1).
 Schema per entry::
 
     {
-        "id":       "llama3-8b",
-        "name":     "Llama 3 8B",
-        "mode":     "local",            # "local" | "online"
-        "path":     "/models/llama3.gguf",
-        "address":  "http://localhost:8080/v1",
-        "provider": "",                  # "OpenAI", "Anthropic", …
-        "api_key":  "",
-        "endpoint": "",
-        "model_id": "",
-        "size_bytes": 4_500_000_000,
-        "size_label": "4.5 GB",
-        "compute":  "GPU",              # "GPU" | "CPU" | "Unknown"
-        "parameters": "",               # e.g. "8B", "70B"
-        "quant":    "",                  # e.g. "Q4_K_M", "FP16"
-        "notes":    ""
+        "id":              "llama3-8b",
+        "name":            "Llama 3 8B",
+        "mode":            "local",          # "local" | "online"
+        "path":            "/models/llama3.gguf",
+        "address":         "http://localhost:8080/v1",
+        "provider":        "",               # "OpenAI", "Anthropic", …
+        "api_key":         "",
+        "endpoint":        "",
+        "model_id":        "",
+        "size_bytes":      4_500_000_000,
+        "size_label":      "4.5 GB",
+        "compute":         "GPU",            # "GPU" | "CPU" | "Unknown"
+        "parameters":      "",               # e.g. "8B", "70B"
+        "quant":           "",               # e.g. "Q4_K_M", "FP16"
+        "notes":           "",
+        "stop_tokens":     [],               # extra stop/artifact tokens to strip
+        "chat_template":   "auto",           # "auto"|"chatml"|"llama3"|"mistral"|…
+        "needs_formatting": True,            # strip artifact tokens before display
     }
 
 The module never imports Qt — it is pure-Python so core logic or
@@ -144,14 +147,20 @@ class LLMRegistry:
         parameters: str = "",
         quant: str = "",
         notes: str = "",
+        stop_tokens: list[str] | None = None,
+        chat_template: str | None = None,
+        needs_formatting: bool | None = None,
     ) -> dict[str, Any]:
         """Add or update a **local** model entry.
 
         Auto-detects size, quant, param count, and compute type from
-        the file when not provided explicitly.
+        the file when not provided explicitly.  Formatting fields
+        (stop_tokens, chat_template, needs_formatting) are preserved
+        from the existing entry when not supplied.
         """
         entry_id = _slugify(name)
         filename = Path(path).name if path else ""
+        existing = self._entries.get(entry_id, {})
 
         size_bytes = 0
         if path and os.path.isfile(path):
@@ -173,6 +182,20 @@ class LLMRegistry:
             "parameters": parameters or _guess_params(filename),
             "quant": quant or _guess_quant(filename),
             "notes": notes,
+            # Formatting fields — use supplied value, else preserve existing,
+            # else use sensible default
+            "stop_tokens": (
+                stop_tokens if stop_tokens is not None
+                else existing.get("stop_tokens", [])
+            ),
+            "chat_template": (
+                chat_template if chat_template is not None
+                else existing.get("chat_template", "auto")
+            ),
+            "needs_formatting": (
+                needs_formatting if needs_formatting is not None
+                else existing.get("needs_formatting", True)
+            ),
         }
         self._entries[entry_id] = entry
         self._save()
@@ -187,9 +210,13 @@ class LLMRegistry:
         model_id: str = "",
         *,
         notes: str = "",
+        stop_tokens: list[str] | None = None,
+        chat_template: str | None = None,
+        needs_formatting: bool | None = None,
     ) -> dict[str, Any]:
         """Add or update an **online** API entry."""
         entry_id = _slugify(name)
+        existing = self._entries.get(entry_id, {})
         entry: dict[str, Any] = {
             "id": entry_id,
             "name": name,
@@ -206,8 +233,30 @@ class LLMRegistry:
             "parameters": "",
             "quant": "",
             "notes": notes,
+            "stop_tokens": (
+                stop_tokens if stop_tokens is not None
+                else existing.get("stop_tokens", [])
+            ),
+            "chat_template": (
+                chat_template if chat_template is not None
+                else existing.get("chat_template", "auto")
+            ),
+            # Online APIs are clean by default
+            "needs_formatting": (
+                needs_formatting if needs_formatting is not None
+                else existing.get("needs_formatting", False)
+            ),
         }
         self._entries[entry_id] = entry
+        self._save()
+        return entry
+
+    def patch(self, entry_id: str, **fields: Any) -> dict[str, Any] | None:
+        """Update specific fields of an existing entry without touching others."""
+        entry = self._entries.get(entry_id)
+        if entry is None:
+            return None
+        entry.update(fields)
         self._save()
         return entry
 
