@@ -49,7 +49,10 @@ class Plugin(OpenAICompatPlugin):
         # Auto-start the server if we have a local model and port is free
         if model_path and Path(model_path).is_file():
             if not self._is_port_in_use(host, port):
-                self._launch_server(model_path, host, port)
+                self._launch_server(
+                    model_path, host, port,
+                    server_binary=config.get("server_binary", ""),
+                )
 
         # Standard OpenAI-compat connect (verify + fetch models)
         super().connect(config)
@@ -71,8 +74,9 @@ class Plugin(OpenAICompatPlugin):
 
     def _launch_server(
         self, model_path: str, host: str, port: int,
+        server_binary: str = "",
     ) -> None:
-        binary = self._find_binary()
+        binary = self._find_binary(server_binary)
         if not binary:
             raise ConnectionError(
                 "Cannot find 'llama-server' on this system.\n\n"
@@ -146,8 +150,15 @@ class Plugin(OpenAICompatPlugin):
     # ── Helpers ────────────────────────────────────────────────
 
     @staticmethod
-    def _find_binary() -> str | None:
-        """Locate the ``llama-server`` executable."""
+    def _find_binary(configured: str = "") -> str | None:
+        """Locate the ``llama-server`` executable.
+
+        If *configured* is a valid path to a file it is used directly.
+        Otherwise falls back to PATH lookup and common install dirs.
+        """
+        if configured and Path(configured).is_file():
+            return configured
+
         found = shutil.which("llama-server")
         if found:
             return found

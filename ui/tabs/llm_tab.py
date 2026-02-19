@@ -283,6 +283,27 @@ class LLMTab(BaseTab):
         self._local_address.textChanged.connect(self._on_local_address_changed)
         lay.addWidget(self._row("Address", self._local_address))
 
+        # Server binary path (for auto-launching llama-server etc.)
+        bin_row = QWidget()
+        brl = QHBoxLayout(bin_row)
+        brl.setContentsMargins(0, 0, 0, 0)
+        brl.setSpacing(8)
+
+        self._server_bin_edit = QLineEdit()
+        self._server_bin_edit.setObjectName("SettingsLineEdit")
+        self._server_bin_edit.setPlaceholderText("(auto-detect from PATH)")
+        self._server_bin_edit.setText(self.config.get("llm.server_binary", ""))
+        self._server_bin_edit.textChanged.connect(self._on_server_binary_changed)
+        brl.addWidget(self._server_bin_edit, 1)
+
+        self._server_bin_browse = QPushButton("Browse...")
+        self._server_bin_browse.setObjectName("ModeButton")
+        self._server_bin_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._server_bin_browse.clicked.connect(self._on_browse_server_binary)
+        brl.addWidget(self._server_bin_browse)
+
+        lay.addWidget(self._row("Server Binary", bin_row))
+
         # Path display
         self._local_path_label = QLabel("No model selected")
         self._local_path_label.setObjectName("PillSub")
@@ -423,6 +444,19 @@ class LLMTab(BaseTab):
         self._registry.upsert_local(
             name=entry["name"], path=entry["path"], address=text,
         )
+
+    def _on_server_binary_changed(self, text: str) -> None:
+        self.config.set("llm.server_binary", text.strip())
+
+    def _on_browse_server_binary(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select llama-server Binary",
+            "",
+            "Executables (*);;All Files (*)",
+        )
+        if path:
+            self._server_bin_edit.setText(path)
 
     def _on_local_selected(self, idx: int) -> None:
         models = self._get_local_models()
@@ -859,6 +893,7 @@ class LLMTab(BaseTab):
                 cfg["base_url"] = entry.get("address", "")
                 cfg["model_name"] = entry.get("name", "")
                 cfg["model_path"] = entry.get("path", "")
+                cfg["server_binary"] = self.config.get("llm.server_binary", "")
 
         # Disable buttons and show progress while connecting
         self._connect_btn.setEnabled(False)
