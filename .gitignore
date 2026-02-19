@@ -3,3 +3,8 @@ __pycache__/
 *.pyo
 config.json
 .idea/
+
+# Runtime-generated data files
+timing_history.json
+emotion_weights.json
+self_dev_state.json
