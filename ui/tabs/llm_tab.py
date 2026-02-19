@@ -214,6 +214,20 @@ class LLMTab(BaseTab):
             f"font-weight:700; font-size:13px; color:{'#33d17a' if online else '#8fa6c3'};"
         )
 
+    def _on_gpu_toggled(self, use_gpu: bool) -> None:
+        self.config.set("llm.use_gpu", use_gpu)
+        if use_gpu:
+            self._gpu_hint.setText(
+                "GPU: all layers offloaded to CUDA  "
+                "(requires CUDA-enabled llama.cpp build)"
+            )
+            self._gpu_hint.setStyleSheet("color:#33d17a; font-size:11px; padding:2px 0;")
+        else:
+            self._gpu_hint.setText(
+                "CPU: all layers computed on CPU  (works on any system)"
+            )
+            self._gpu_hint.setStyleSheet("color:#8fa6c3; font-size:11px; padding:2px 0;")
+
     # ══════════════════════════════════════════════════════════
     # LOCAL page
     # ══════════════════════════════════════════════════════════
@@ -338,6 +352,43 @@ class LLMTab(BaseTab):
         lay.addWidget(sep2)
 
         lay.addWidget(self._heading("llama.cpp Settings"))
+
+        # ── Compute Device (CPU / GPU) ─────────────────────────
+        compute_row = QWidget()
+        cw = QHBoxLayout(compute_row)
+        cw.setContentsMargins(0, 0, 0, 0)
+        cw.setSpacing(10)
+
+        cpu_lbl = QLabel("CPU")
+        cpu_lbl.setStyleSheet("font-weight:700; font-size:13px;")
+        cw.addWidget(cpu_lbl)
+
+        use_gpu = self.config.get("llm.use_gpu", False)
+        self._gpu_toggle = ToggleSwitch(checked=bool(use_gpu), width=50, height=24)
+        self._gpu_toggle.toggled.connect(self._on_gpu_toggled)
+        cw.addWidget(self._gpu_toggle, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        gpu_lbl = QLabel("GPU (CUDA)")
+        gpu_lbl.setStyleSheet("font-weight:700; font-size:13px;")
+        cw.addWidget(gpu_lbl)
+        cw.addStretch(1)
+        lay.addWidget(compute_row)
+
+        self._gpu_hint = QLabel(
+            "GPU: all layers offloaded to CUDA  (requires CUDA-enabled llama.cpp build)"
+            if bool(use_gpu)
+            else "CPU: all layers computed on CPU  (works on any system)"
+        )
+        self._gpu_hint.setWordWrap(True)
+        self._gpu_hint.setStyleSheet("color:#8fa6c3; font-size:11px; padding:2px 0;")
+        lay.addWidget(self._gpu_hint)
+
+        gpu_fallback_note = QLabel(
+            "If CUDA is unavailable, llama-server will fall back to CPU automatically."
+        )
+        gpu_fallback_note.setWordWrap(True)
+        gpu_fallback_note.setStyleSheet("color:#5a6a7e; font-size:10px; padding:0 0 4px 0;")
+        lay.addWidget(gpu_fallback_note)
 
         # llama-server binary path
         server_bin_row = QWidget()
@@ -1009,6 +1060,8 @@ class LLMTab(BaseTab):
                 cfg["model_name"] = entry.get("name", "")
                 cfg["model_path"] = entry.get("path", "")
             cfg["llama_server_path"] = self.config.get("llm.llama_server_path", "")
+            # CPU=0 layers on GPU, GPU=-1 means all layers on GPU
+            cfg["n_gpu_layers"] = -1 if self.config.get("llm.use_gpu", False) else 0
 
         # Disable buttons and show progress while connecting
         self._connect_btn.setEnabled(False)

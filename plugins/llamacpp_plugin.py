@@ -47,10 +47,16 @@ class Plugin(OpenAICompatPlugin):
         host = parsed.hostname or "127.0.0.1"
         port = parsed.port or 8080
 
+        # n_gpu_layers: -1 = all on GPU, 0 = CPU only
+        n_gpu_layers: int = int(config.get("n_gpu_layers", 0))
+
         # Auto-start the server if we have a local model and port is free
         if model_path and Path(model_path).is_file():
             if not self._is_port_in_use(host, port):
-                self._launch_server(model_path, host, port, server_binary)
+                self._launch_server(
+                    model_path, host, port, server_binary,
+                    n_gpu_layers=n_gpu_layers,
+                )
 
         # Standard OpenAI-compat connect (verify + fetch models)
         super().connect(config)
@@ -73,6 +79,7 @@ class Plugin(OpenAICompatPlugin):
     def _launch_server(
         self, model_path: str, host: str, port: int,
         server_binary: str = "",
+        n_gpu_layers: int = 0,
     ) -> None:
         binary = self._find_binary(server_binary)
         if not binary:
@@ -88,6 +95,7 @@ class Plugin(OpenAICompatPlugin):
             "--model", model_path,
             "--host", host,
             "--port", str(port),
+            "--n-gpu-layers", str(n_gpu_layers),
         ]
 
         self._server_proc = subprocess.Popen(

@@ -112,12 +112,20 @@ class ConversationManager:
             self.timer.begin()
 
         plugin = self.pm.active_plugin
-        if plugin is None or not plugin.is_connected():
+        if plugin is None:
             if self.timer:
                 self.timer.finish()
             self._publish_error(
-                "Something is wrong with my AI — no backend is connected. "
-                "Go to the LLM tab and connect a provider."
+                "I cannot respond right now — no AI backend is connected. "
+                "Go to the LLM tab, select a backend, and press Connect."
+            )
+            return None
+        if not plugin.is_connected():
+            if self.timer:
+                self.timer.finish()
+            self._publish_error(
+                f"I cannot respond right now — the backend ({type(plugin).__name__}) "
+                "is not connected. Go to the LLM tab and press Connect."
             )
             return None
 
@@ -159,7 +167,8 @@ class ConversationManager:
                 self.timer.stop("inference")
                 self.timer.finish()
             self._publish_error(
-                f"Something is wrong with my AI — {e}"
+                f"I encountered an error while generating a response. "
+                f"Failure: {e}"
             )
             return None
 

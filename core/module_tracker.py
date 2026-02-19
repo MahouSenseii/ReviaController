@@ -6,9 +6,9 @@ to determine whether each module is actually functional.  Publishes
 ``module_status`` events so the sidebar pills show the real state
 instead of staying on "Idle" forever.
 
-When a module is toggled ON but no AI backend supports it (or no
-backend is connected at all), the pill shows a warning with the
-message "Something is wrong with my AI".
+When a module is toggled ON but something is wrong, the pill shows a
+warning with a specific message about what is failing, and an
+``activity_log`` event is published so the error also appears in chat.
 """
 
 from __future__ import annotations
@@ -25,6 +25,13 @@ _MODULE_CAPS = {
     "stt":    PluginCapability.STT,
     "tts":    PluginCapability.TTS,
     "vision": PluginCapability.VISION,
+}
+
+# Human-readable module names for error messages
+_MODULE_NAMES = {
+    "stt":    "Speech-to-Text (STT)",
+    "tts":    "Text-to-Speech (TTS)",
+    "vision": "Vision",
 }
 
 
@@ -84,6 +91,7 @@ class ModuleStatusTracker(QObject):
     def _publish(self, module: str) -> None:
         """Evaluate and publish the real status of *module*."""
         enabled = self._enabled.get(module, False)
+        module_name = _MODULE_NAMES.get(module, module.upper())
 
         if not enabled:
             self._bus.publish("module_status", {
@@ -94,20 +102,45 @@ class ModuleStatusTracker(QObject):
             return
 
         plugin = self._pm.active_plugin
-        if plugin is None or not plugin.is_connected():
+        if plugin is None:
+            subtitle = "No AI backend connected — go to LLM tab"
             self._bus.publish("module_status", {
                 "module": module,
                 "status": "warn",
-                "subtitle": "Something is wrong with my AI",
+                "subtitle": subtitle,
+            })
+            self._bus.publish("activity_log", {
+                "text": f"[Error] {module_name} is unavailable: no AI backend is connected. "
+                        f"Connect a backend in the LLM tab.",
+            })
+            return
+
+        if not plugin.is_connected():
+            subtitle = "Backend disconnected — check LLM tab"
+            self._bus.publish("module_status", {
+                "module": module,
+                "status": "warn",
+                "subtitle": subtitle,
+            })
+            self._bus.publish("activity_log", {
+                "text": f"[Error] {module_name} is unavailable: the AI backend is not "
+                        f"connected. Use the LLM tab to reconnect.",
             })
             return
 
         required_cap = _MODULE_CAPS.get(module)
         if required_cap and not (plugin.capabilities & required_cap):
+            plugin_name = type(plugin).__name__
+            subtitle = f"Backend ({plugin_name}) does not support {module.upper()}"
             self._bus.publish("module_status", {
                 "module": module,
                 "status": "warn",
-                "subtitle": "Something is wrong with my AI",
+                "subtitle": subtitle,
+            })
+            self._bus.publish("activity_log", {
+                "text": f"[Error] {module_name} is unavailable: the active backend "
+                        f"({plugin_name}) does not advertise the {module.upper()} "
+                        f"capability. Switch to a backend that supports it.",
             })
             return
 
