@@ -216,6 +216,14 @@ class LLMTab(BaseTab):
 
     def _on_gpu_toggled(self, use_gpu: bool) -> None:
         self.config.set("llm.use_gpu", use_gpu)
+        # Keep the registry in sync so the next connect reflects the correct compute label
+        idx = self._local_combo.currentIndex()
+        models = self._get_local_models()
+        if models and 0 <= idx < len(models):
+            entry = models[idx]
+            reg_entry = self._registry.find_by_name(entry["name"])
+            if reg_entry:
+                self._registry.patch(reg_entry["id"], compute="GPU" if use_gpu else "CPU")
         if use_gpu:
             self._gpu_hint.setText(
                 "GPU: all layers offloaded to CUDA  "
@@ -1145,6 +1153,10 @@ class LLMTab(BaseTab):
                     reg = self._registry.find_by_name(models[lidx]["name"]) or {}
             # Plugin metadata (context window etc.) takes lower priority
             merged = {**(active.metadata or {}), **reg}
+            # Override compute label to match the actual GPU/CPU setting used at connect time
+            if not is_online:
+                use_gpu = self.config.get("llm.use_gpu", False)
+                merged["compute"] = "GPU" if use_gpu else "CPU"
             self.bus.publish("model_changed", {
                 "model": active.name,
                 "mode": "online" if is_online else "local",
