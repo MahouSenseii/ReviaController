@@ -17,6 +17,7 @@ from ui.tabs import (
     FiltersTab,
     LLMTab,
     LogsTab,
+    MemoryTab,
     SystemTab,
     VoiceVisionTab,
 )
@@ -47,6 +48,7 @@ class SettingsPanel(BasePanel):
 
         self._behavior_tab = BehaviorTab(self.bus, self.config)
         self._llm_tab = LLMTab(self.bus, self.config, self._plugin_manager)
+        self._memory_tab = MemoryTab(self.bus, self.config)
         self._voice_vision_tab = VoiceVisionTab(self.bus, self.config)
         self._filters_tab = FiltersTab(self.bus, self.config)
         self._logs_tab = LogsTab(self.bus, self.config)
@@ -54,6 +56,7 @@ class SettingsPanel(BasePanel):
 
         self._tabs.addTab(self._behavior_tab, "Profile")
         self._tabs.addTab(self._llm_tab, "LLM")
+        self._tabs.addTab(self._memory_tab, "Memory")
         self._tabs.addTab(self._voice_vision_tab, "Voice && Vision")
         self._tabs.addTab(self._filters_tab, "Filters")
         self._tabs.addTab(self._logs_tab, "Logs")

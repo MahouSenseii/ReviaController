@@ -223,13 +223,20 @@ class CenterPanel(BasePanel):
         sl.setContentsMargins(12, 10, 12, 10)
         sl.setSpacing(4)
 
-        self._st_listening   = _StatusItem("Listening...", "off")
-        self._st_processing  = _StatusItem("Processing Command...", "off")
-        self._st_generating  = _StatusItem("Generating Response...", "off")
-        self._st_vision      = _StatusItem("Vision: Idle", "off")
+        self._st_listening  = _StatusItem("Listening...", "off")
+        self._st_analyzing  = _StatusItem("Analyzing Input...", "off")
+        self._st_emotion    = _StatusItem("Processing Emotions...", "off")
+        self._st_decision   = _StatusItem("Making Decision...", "off")
+        self._st_memory     = _StatusItem("Querying Memory...", "off")
+        self._st_generating = _StatusItem("Generating Response...", "off")
+        self._st_learning   = _StatusItem("Learning...", "off")
+        self._st_vision     = _StatusItem("Vision: Idle", "off")
 
-        for item in (self._st_listening, self._st_processing,
-                     self._st_generating, self._st_vision):
+        for item in (
+            self._st_listening, self._st_analyzing, self._st_emotion,
+            self._st_decision, self._st_memory, self._st_generating,
+            self._st_learning, self._st_vision,
+        ):
             sl.addWidget(item)
 
         # Start in listening state
@@ -355,15 +362,8 @@ class CenterPanel(BasePanel):
         title.setStyleSheet("color: #8fc9ff;")
 
         inner = panel_inner(p)
-        old = inner.layout()
-        if old is not None:
-            while old.count():
-                item = old.takeAt(0)
-                w = item.widget()
-                if w:
-                    w.setParent(None)
-
-        il = QHBoxLayout(inner)
+        container = QWidget()
+        il = QHBoxLayout(container)
         il.setContentsMargins(12, 12, 12, 12)
         il.setSpacing(12)
 
@@ -395,6 +395,8 @@ class CenterPanel(BasePanel):
 
         self._preview = GhostPanel("Preview / Whiteboard / Vision Frame", height=220)
         il.addWidget(self._preview, 1)
+
+        inner.layout().addWidget(container)
         return p
 
     # ══════════════════════════════════════════════════════════
@@ -518,28 +520,42 @@ class CenterPanel(BasePanel):
     # ══════════════════════════════════════════════════════════
 
     def _set_status_state(self, state: str) -> None:
-        """Light up the correct status dots.
+        """Light up the correct status dot.
 
-        States: 'listening', 'processing', 'generating', 'error'
+        States: 'listening', 'analyzing', 'emotion', 'decision',
+                'memory', 'generating', 'learning', 'error'
         """
         self._st_listening.set_active(state == "listening")
-        self._st_processing.set_active(state == "processing")
+        self._st_analyzing.set_active(state == "analyzing")
+        self._st_emotion.set_active(state == "emotion")
+        self._st_decision.set_active(state == "decision")
+        self._st_memory.set_active(state == "memory")
         self._st_generating.set_active(state == "generating")
+        self._st_learning.set_active(state == "learning")
+        if state == "error":
+            self._st_generating.set_warn()
 
     # ══════════════════════════════════════════════════════════
     # Event handlers
     # ══════════════════════════════════════════════════════════
 
     def _on_user_message_status(self, data: dict) -> None:
-        self._set_status_state("processing")
+        self._set_status_state("analyzing")
 
     def _on_assistant_status(self, data: dict) -> None:
+        # Prefer the explicit stage key (new-style events)
+        stage = data.get("stage", "")
+        if stage:
+            self._set_status_state(stage)
+            return
+
+        # Fallback: parse legacy text lines
         lines = data.get("lines", [])
         joined = " ".join(lines).lower()
         if "generating" in joined:
             self._set_status_state("generating")
         elif "processing" in joined:
-            self._set_status_state("processing")
+            self._set_status_state("analyzing")
         elif "listening" in joined:
             self._set_status_state("listening")
         elif "error" in joined:
@@ -612,15 +628,8 @@ class CenterPanel(BasePanel):
         title.setStyleSheet("color: #8fc9ff;")
 
         inner = panel_inner(p)
-        old = inner.layout()
-        if old is not None:
-            while old.count():
-                item = old.takeAt(0)
-                w = item.widget()
-                if w:
-                    w.setParent(None)
-
-        il = QHBoxLayout(inner)
+        container = QWidget()
+        il = QHBoxLayout(container)
         il.setContentsMargins(12, 8, 12, 8)
         il.setSpacing(16)
 
@@ -703,17 +712,25 @@ class CenterPanel(BasePanel):
         meta_w.setLayout(meta_col)
         il.addWidget(meta_w, 1)
 
+        inner.layout().addWidget(container)
         return p
 
     # ── Pipeline timing handler ────────────────────────────────
 
     def _on_pipeline_timing(self, data: dict) -> None:
+        def _fmt(cur: str, avg: str) -> str:
+            if avg and avg != "-":
+                return f"{cur}  (avg {avg})"
+            return cur
+
+        runs = data.get("runs", "")
+        runs_str = f"  [{runs} runs]" if runs else ""
         lines = [
             f"Stimulus:  {data.get('stimulus', '-')}",
             f"Emotion:   {data.get('emotion', '-')}",
-            f"Decision:  {data.get('decision', '-')}",
-            f"Inference: {data.get('inference', '-')}",
-            f"Total:     {data.get('total', '-')}",
+            f"Decision:  {_fmt(data.get('decision', '-'), data.get('avg_decision', ''))}",
+            f"Inference: {_fmt(data.get('inference', '-'), data.get('avg_inference', ''))}",
+            f"Total:     {_fmt(data.get('total', '-'), data.get('avg_total', ''))}{runs_str}",
         ]
         self._timing_label.setText("\n".join(lines))
 

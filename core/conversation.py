@@ -129,13 +129,12 @@ class ConversationManager:
         self.bus.publish("activity_log", {
             "text": f'User: "{user_text}"',
         })
-        self.bus.publish("assistant_status", {
-            "lines": ["Processing...", "Generating Response..."],
-        })
+        self.bus.publish("assistant_status", {"stage": "analyzing"})
 
         # ── Decision engine ───────────────────────────────────
         strategy = None
         if self.decision:
+            self.bus.publish("assistant_status", {"stage": "decision"})
             if self.timer:
                 self.timer.start("decision")
             strategy = self.decision.decide(user_text)
@@ -146,6 +145,7 @@ class ConversationManager:
         messages = self._build_messages(strategy)
 
         # ── Inference ─────────────────────────────────────────
+        self.bus.publish("assistant_status", {"stage": "generating"})
         if self.timer:
             self.timer.start("inference")
 
@@ -194,10 +194,6 @@ class ConversationManager:
         self.bus.publish("activity_log", {
             "text": f'AI: "{reply[:200]}{"..." if len(reply) > 200 else ""}"',
         })
-        self.bus.publish("assistant_status", {
-            "lines": ["Listening...", "Vision: Idle"],
-        })
-
         # Publish LLM metrics
         try:
             m = plugin.get_metrics()
@@ -210,10 +206,14 @@ class ConversationManager:
         except Exception:
             pass
 
+        # Brief "learning" stage before going back to listening
+        self.bus.publish("assistant_status", {"stage": "learning"})
+
         # ── Finish pipeline timing ────────────────────────────
         if self.timer:
             self.timer.finish()
 
+        self.bus.publish("assistant_status", {"stage": "listening"})
         return reply
 
     def clear_history(self) -> None:
