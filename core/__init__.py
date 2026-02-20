@@ -14,5 +14,16 @@ from .self_dev import SelfDevelopmentEngine
 from .timing import PipelineTimer
 from .system_monitor import SystemMonitor
 from .module_tracker import ModuleStatusTracker
-from .stt_manager import STTManager
-from .tts_manager import TTSManager
+
+# Optional audio modules depend on system libraries (e.g., PortAudio).
+# Import them defensively so non-audio workflows (tests, headless use)
+# can still import ``core`` without hard failures.
+try:
+    from .stt_manager import STTManager
+except Exception:  # pragma: no cover - depends on host audio stack
+    STTManager = None  # type: ignore[assignment]
+
+try:
+    from .tts_manager import TTSManager
+except Exception:  # pragma: no cover - depends on host audio stack
+    TTSManager = None  # type: ignore[assignment]

@@ -18,25 +18,41 @@ from PyQt6.QtCore import QObject, QTimer
 from .events import EventBus
 from .plugin_manager import PluginManager
 
+_NVML_HANDLE = None
+_NVML_FAILED = False
 
-def _gpu_stats() -> tuple[Optional[str], Optional[str]]:
-    """Return (gpu_usage%, vram_usage%) strings, or (None, None)."""
+
+def _nvml_stats() -> tuple[Optional[str], Optional[str]]:
+    """Read GPU/VRAM via NVML while keeping the library initialized."""
+    global _NVML_HANDLE, _NVML_FAILED
+
+    if _NVML_FAILED:
+        return None, None
+
     try:
-        # Try pynvml first (fast, no subprocess)
         import pynvml  # type: ignore[import-untyped]
 
-        pynvml.nvmlInit()
-        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-        util = pynvml.nvmlDeviceGetUtilizationRates(handle)
-        mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        if _NVML_HANDLE is None:
+            pynvml.nvmlInit()
+            _NVML_HANDLE = pynvml.nvmlDeviceGetHandleByIndex(0)
+
+        util = pynvml.nvmlDeviceGetUtilizationRates(_NVML_HANDLE)
+        mem = pynvml.nvmlDeviceGetMemoryInfo(_NVML_HANDLE)
         gpu_pct = f"{util.gpu}%"
         vram_used_mb = mem.used / (1024 ** 2)
         vram_total_mb = mem.total / (1024 ** 2)
         vram_pct = f"{vram_used_mb / vram_total_mb * 100:.0f}%"
-        pynvml.nvmlShutdown()
         return gpu_pct, vram_pct
     except Exception:
-        pass
+        _NVML_FAILED = True
+        return None, None
+
+
+def _gpu_stats() -> tuple[Optional[str], Optional[str]]:
+    """Return (gpu_usage%, vram_usage%) strings, or (None, None)."""
+    gpu_pct, vram_pct = _nvml_stats()
+    if gpu_pct is not None or vram_pct is not None:
+        return gpu_pct, vram_pct
 
     # Fallback: nvidia-smi CLI
     if shutil.which("nvidia-smi") is None:
